@@ -1,6 +1,6 @@
 # world-models-pytorch
 My attempt to implement "World Models" by David Ha and Jurgen Schmidhuber
-
+Link: https://arxiv.org/pdf/1803.10122.pdf
 ## The work is in progress
 
 
