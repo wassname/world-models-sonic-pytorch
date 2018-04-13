@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch import normal, multinomial
+from torch.autograd import Variable
 
 
 class MDNRNN(nn.Module):
@@ -86,17 +87,17 @@ class MDNRNN(nn.Module):
         return z, hidden_state
 
 
-if __name__ == '__main__':
-    from torch.autograd import Variable
-    z_dim, action_dim, hidden_size, n_mixture, temp = 32, 2, 256, 5, 0.0
-    batch_size = 1
-    seq_len = 1
-    mdnrnn = MDNRNN(z_dim, action_dim, hidden_size, n_mixture, temp)
-    mdnrnn.cuda()
-    prev_z = Variable(torch.randn(batch_size, seq_len, z_dim)).cuda()
-    action = Variable(torch.randn(batch_size, seq_len, action_dim)).cuda()
-
-    new_z, new_hidden_state = mdnrnn.sample(prev_z, action)
-    print(new_z)
-    pi, mean, sigma, hidden_state = mdnrnn.forward(prev_z, action)
-    print(sigma)
+# if __name__ == '__main__':
+#     from torch.autograd import Variable
+#     z_dim, action_dim, hidden_size, n_mixture, temp = 32, 2, 256, 5, 0.0
+#     batch_size = 1
+#     seq_len = 1
+#     mdnrnn = MDNRNN(z_dim, action_dim, hidden_size, n_mixture, temp)
+#     mdnrnn.cuda()
+#     prev_z = Variable(torch.randn(batch_size, seq_len, z_dim)).cuda()
+#     action = Variable(torch.randn(batch_size, seq_len, action_dim)).cuda()
+#
+#     new_z, new_hidden_state = mdnrnn.sample(prev_z, action)
+#     print(new_z)
+#     pi, mean, sigma, hidden_state = mdnrnn.forward(prev_z, action)
+#     print(sigma)
