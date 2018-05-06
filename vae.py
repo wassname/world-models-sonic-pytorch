@@ -4,19 +4,38 @@ from torch.autograd import Variable
 import torch.nn as nn
 
 
-def make_conv_relu(inpt_kernel, output_kernel, kernel_size=4):
-    return nn.Sequential(
-        nn.Conv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=2),
-        nn.ReLU(inplace=True)
-    )
+class ConvBlock(torch.nn.Module):
+    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=2):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride)
+        self.bn = nn.BatchNorm2d(output_kernel)
+        self.act = nn.ReLU(inplace=True)
+
+        gain = nn.init.calculate_gain('relu')
+        nn.init.xavier_uniform(self.conv.weight, gain=gain)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.act(x)
+        return x
 
 
-def make_deconv_relu(inpt_kernel, output_kernel, kernel_size, use_activation=True):
-    return nn.Sequential(
-        nn.ConvTranspose2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=2),
-        nn.ReLU(inplace=True)
-    ) if use_activation \
-        else nn.ConvTranspose2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=2)
+class DeconvBlock(torch.nn.Module):
+    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=2):
+        super().__init__()
+        self.deconv = nn.ConvTranspose2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride)
+        self.bn = nn.BatchNorm2d(output_kernel)
+        self.act = nn.ReLU(inplace=True)
+
+        gain = nn.init.calculate_gain('relu')
+        nn.init.xavier_uniform(self.deconv.weight, gain=gain)
+
+    def forward(self, x):
+        x = self.deconv(x)
+        x = self.bn(x)
+        x = self.act(x)
+        return x
 
 
 # Reconstruction + KL divergence losses summed over all elements and batch
@@ -35,25 +54,28 @@ def loss_function(recon_x, x, mu, logvar):
     return l2_dist + KLD
 
 
+n = 2  # multiplier to multiply input dims
+
 class VAE(nn.Module):
-    def __init__(self, latent_vector_dim=32):
+    def __init__(self, latent_vector_dim=32 * n):
         super(VAE, self).__init__()
         # encoder part
-        self.conv1 = make_conv_relu(3, 32)
-        self.conv2 = make_conv_relu(32, 64)
-        self.conv3 = make_conv_relu(64, 128)
-        self.conv4 = make_conv_relu(128, 256)
 
-        self.mu = nn.Linear(1024, latent_vector_dim)
-        self.logvar = nn.Linear(1024, latent_vector_dim)
+        self.conv1 = ConvBlock(3, 32 * n, 4 * n, 2 * n)
+        self.conv2 = ConvBlock(32 * n, 64 * n, 4, 2)
+        self.conv3 = ConvBlock(64 * n, 128 * n, 4, 2)
+        self.conv4 = ConvBlock(128 * n, 256 * n, 4, 2)
 
-        self.z = nn.Linear(latent_vector_dim, 1024)
+        self.mu = nn.Linear(1024 * n, latent_vector_dim)
+        self.logvar = nn.Linear(1024 * n, latent_vector_dim)
+
+        self.z = nn.Linear(latent_vector_dim, 1024 * n)
 
         # decoder part
-        self.deconv1 = make_deconv_relu(1024, 128, 5)
-        self.deconv2 = make_deconv_relu(128, 64, 5)
-        self.deconv3 = make_deconv_relu(64, 32, 6)
-        self.deconv4 = make_deconv_relu(32, 3, 6)
+        self.deconv1 = DeconvBlock(1024 * n, 128 * n, 5, 2)
+        self.deconv2 = DeconvBlock(128 * n, 64 * n, 5, 2)
+        self.deconv3 = DeconvBlock(64 * n, 32 * n, 6, 2)
+        self.deconv4 = DeconvBlock(32 * n, 3, 6 * n, 2 * n)
 
         self.sigmoid = nn.Sigmoid()
 
@@ -91,20 +113,28 @@ class VAE(nn.Module):
         return x, mu, logvar
 
 
-# if __name__ == '__main__':
-#     import numpy as np
-#     import cv2
-#
-#     img = np.random.randn(64, 64, 3)
-#     gpu_img = Variable(torch.from_numpy(img[np.newaxis].transpose(0, 3, 1, 2))).float().cuda()
-#
-#     vae = VAE()
-#     vae.cuda()
-#     x, mu, logvar = vae.forward(gpu_img)
-#     print(x.size())
-#     print(loss_function(x, gpu_img, mu, logvar))
-#     x = x.data.cpu().numpy()[0].transpose(1, 2, 0)
-#
-#     cv2.imshow('original', img)
-#     cv2.imshow('reconstructed', x)
-#     cv2.waitKey()
+if __name__ == '__main__':
+    import numpy as np
+    from matplotlib import pyplot as plt
+
+    img = np.random.randn(64, 64, 3)
+    gpu_img = Variable(torch.from_numpy(img[np.newaxis].transpose(0, 3, 1, 2))).float().cuda()
+
+    vae = VAE()
+    vae.cuda()
+    x, mu, logvar = vae.forward(gpu_img)
+    print(x.size())
+    print(loss_function(x, gpu_img, mu, logvar))
+    x = x.data.cpu().numpy()[0].transpose(1, 2, 0)
+
+    plt.imshow(img)
+    plt.title('original')
+    plt.show()
+
+    plt.imshow(x)
+    plt.title('reconstructed')
+    plt.show()
+
+    # cv2.imshow('original', img)
+    # cv2.imshow('reconstructed', x)
+    # cv2.waitKey()
