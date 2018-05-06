@@ -2,12 +2,14 @@ import torch
 from torch.nn import functional as F
 from torch.autograd import Variable
 import torch.nn as nn
+import math
+import numpy as np
 
 
 class ConvBlock(torch.nn.Module):
-    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=2):
+    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride)
+        self.conv = nn.Conv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride, padding=padding)
         self.bn = nn.BatchNorm2d(output_kernel)
         self.act = nn.ReLU(inplace=True)
 
@@ -22,9 +24,9 @@ class ConvBlock(torch.nn.Module):
 
 
 class DeconvBlock(torch.nn.Module):
-    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=2):
+    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
         super().__init__()
-        self.deconv = nn.ConvTranspose2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride)
+        self.deconv = nn.ConvTranspose2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride, padding=padding)
         self.bn = nn.BatchNorm2d(output_kernel)
         self.act = nn.ReLU(inplace=True)
 
@@ -38,70 +40,69 @@ class DeconvBlock(torch.nn.Module):
         return x
 
 
-# Reconstruction + KL divergence losses summed over all elements and batch
-# https://github.com/pytorch/examples/blob/master/vae/main.py
-def loss_function(recon_x, x, mu, logvar):
-    n, c, h, w = recon_x.size()
-    recon_x = recon_x.view(n, -1)
-    x = x.view(n, -1)
-    # L2 distance
-    l2_dist = torch.mean(torch.sqrt(torch.sum(torch.pow(recon_x - x, 2), 1)))
-    # see Appendix B from VAE paper:
-    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-    # https://arxiv.org/abs/1312.6114
-    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return l2_dist + KLD
-
-
-n = 2  # multiplier to multiply input dims
-
 class VAE(nn.Module):
-    def __init__(self, latent_vector_dim=32 * n):
-        super(VAE, self).__init__()
-        # encoder part
+    """
+    VAE. Vector Quantised Variational Auto-Encoder.
 
-        self.conv1 = ConvBlock(3, 32 * n, 4 * n, 2 * n)
-        self.conv2 = ConvBlock(32 * n, 64 * n, 4, 2)
-        self.conv3 = ConvBlock(64 * n, 128 * n, 4, 2)
-        self.conv4 = ConvBlock(128 * n, 256 * n, 4, 2)
+    Refs:
+    - https://github.com/nakosung/VQ-VAE/blob/master/model.py
+    - https://github.com/JunhongXu/world-models-pytorch/blob/master/vae.py
+    """
 
-        self.mu = nn.Linear(1024 * n, latent_vector_dim)
-        self.logvar = nn.Linear(1024 * n, latent_vector_dim)
+    def __init__(self, image_size=64, z_dim=32, conv_dim=64, code_dim=16, k_dim=256):
+        """
+        Args:
+        - image_size (int) height and weight of image
+        - conv_dim (int) the amound of output channels in the first conv layer (all others are multiples)
+        - z_dim (int) the channels in the encoded output
+        - code_dim (int) the height and width in the encoded output
+        - k_dim (int) dimensions of the latent vector
+        """
+        super().__init__()
 
-        self.z = nn.Linear(latent_vector_dim, 1024 * n)
+        self.k_dim = k_dim
+        self.z_dim = z_dim
+        self.code_dim = code_dim
 
-        # decoder part
-        self.deconv1 = DeconvBlock(1024 * n, 128 * n, 5, 2)
-        self.deconv2 = DeconvBlock(128 * n, 64 * n, 5, 2)
-        self.deconv3 = DeconvBlock(64 * n, 32 * n, 6, 2)
-        self.deconv4 = DeconvBlock(32 * n, 3, 6 * n, 2 * n)
+        hidden_size = z_dim * code_dim * code_dim
+        latent_vector_dim = k_dim
+        self.logvar = nn.Linear(hidden_size, latent_vector_dim)
+        self.mu = nn.Linear(hidden_size, latent_vector_dim)
+        self.z = nn.Linear(latent_vector_dim, hidden_size)
+
+        nn.init.xavier_uniform(self.logvar.weight)
+        nn.init.xavier_uniform(self.mu.weight)
+        nn.init.xavier_uniform(self.z.weight)
+
+        # Encoder (increasing #filter linearly)
+        layers = []
+        layers.append(ConvBlock(3, conv_dim, kernel_size=3, padding=1))
+
+        repeat_num = int(math.log2(image_size / code_dim))
+        curr_dim = conv_dim
+        for i in range(repeat_num):
+            layers.append(ConvBlock(curr_dim, conv_dim * (i + 2), kernel_size=4, stride=2, padding=1))
+            curr_dim = conv_dim * (i + 2)
+
+        # Now we have (code_dim,code_dim,curr_dim)
+        layers.append(nn.Conv2d(curr_dim, z_dim, kernel_size=1))
+
+        # (code_dim,code_dim,z_dim)
+        self.encoder = nn.Sequential(*layers)
+
+        # Decoder (320 - 256 - 192 - 128 - 64)
+        layers = []
+
+        layers.append(DeconvBlock(z_dim, curr_dim, kernel_size=1))
+
+        for i in reversed(range(repeat_num)):
+            layers.append(DeconvBlock(curr_dim, conv_dim * (i + 1), kernel_size=4, stride=2, padding=1))
+            curr_dim = conv_dim * (i + 1)
+
+        layers.append(nn.Conv2d(curr_dim, 3, kernel_size=3, padding=1))
+        self.decoder = nn.Sequential(*layers)
 
         self.sigmoid = nn.Sigmoid()
-
-    def encode(self, x):
-        """
-            Returns mean and log variance
-        """
-        x = self.conv4(self.conv3(self.conv2(self.conv1(x))))
-        x = x.view(x.size()[0], -1)
-        return self.mu(x), self.logvar(x)
-
-    def sample(self, mu, logvar):
-        if self.training:
-            std = logvar.exp()
-            std = std * Variable(std.data.new(std.size()).normal_())
-            return mu + std
-        else:
-            return mu
-
-    def decode(self, z):
-        z = self.z(z)
-        n, d = z.size()
-        z = z.view(n, d, 1, 1)
-        reconstruction = self.deconv4(self.deconv3(self.deconv2(self.deconv1(z))))
-        reconstruction = self.sigmoid(reconstruction)
-        return reconstruction
 
     def forward(self, x):
         """
@@ -111,6 +112,47 @@ class VAE(nn.Module):
         z = self.sample(mu, logvar)
         x = self.decode(z)
         return x, mu, logvar
+
+    def encode(self, x):
+        """
+            Returns mean and log variance
+        """
+        x = self.encoder(x)
+        x = x.view(x.size()[0], -1)
+        return self.mu(x), self.logvar(x)
+
+    def decode(self, z):
+        z = self.z(z)
+        n, d = z.size()
+        z = z.view(n, -1, self.code_dim, self.code_dim)
+        reconstruction = self.decoder(z)
+        reconstruction = self.sigmoid(reconstruction)
+        return reconstruction
+
+    def sample(self, mu, logvar):
+        if self.training:
+            std = logvar.exp()
+            std = std * Variable(std.data.new(std.size()).normal_())
+            return mu + std
+        else:
+            return mu
+
+# Reconstruction + KL divergence losses summed over all elements and batch
+# https://github.com/pytorch/examples/blob/master/vae/main.py
+
+
+def loss_function(recon_x, x, mu, logvar):
+    n, c, h, w = recon_x.size()
+    recon_x = recon_x.view(n, -1)
+    x = x.view(n, -1)
+    # L2 distance
+    l2_dist = torch.sqrt(torch.sum(torch.pow(recon_x - x, 2), 1))
+    # see Appendix B from VAE paper:
+    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+    # https://arxiv.org/abs/1312.6114
+    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), 1)
+    return torch.mean(l2_dist + KLD)
 
 
 if __name__ == '__main__':
@@ -134,7 +176,3 @@ if __name__ == '__main__':
     plt.imshow(x)
     plt.title('reconstructed')
     plt.show()
-
-    # cv2.imshow('original', img)
-    # cv2.imshow('reconstructed', x)
-    # cv2.waitKey()
