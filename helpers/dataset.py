@@ -2,6 +2,8 @@ import dask
 from dask.callbacks import Callback
 from tqdm import tqdm_notebook
 import torch.utils.data
+import numpy as np
+import dask.array as da
 
 
 class TQDMDaskProgressBar(Callback):

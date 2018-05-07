@@ -1,0 +1,9 @@
+tqdm
+dask[complete]
+gym
+pytorch
+opencv
+git+https://github.com/openai/retro-contest.git#subdirectory=support[docker,rest]
+gym-retro
+toolz
+h5py
