@@ -19,6 +19,25 @@ def get_names_dict(model):
     _get_names(model)
     return names
 
+def get_params(module, nb_trainable=False):
+    if nb_trainable:
+        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters() if p.requires_grad])
+    else:
+        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters()])
+    if isinstance(params, torch.Tensor):
+        params = params.item()
+    return params
+
+def format_input_output_shape(tensors):
+    # TODO make recursive deal with N levels of inputs
+    if not isinstance(tensors, (list, tuple)):
+        tensors = (tensors, )
+    if not isinstance(tensors[0], (list, tuple)):
+        tensors = (tensors, )
+    # for each input remove batch size and replace with -1
+    input_size = [[(-1, ) + tuple(oo.size()[1:]) for oo in o] for o in tensors if o is not None]
+    return input_size
+
 
 class TorchSummarizeDf(object):
     def __init__(self, model, weights=False, input_shape=True, nb_trainable=False, debug=False):
@@ -88,37 +107,23 @@ class TorchSummarizeDf(object):
         self.summary[m_key]['class_name'] = class_name
 
         # Handle multiple inputs
-        if not isinstance(input, (list, tuple)):
-            input = (input, )
-        if not isinstance(input[0], (list, tuple)):
-            input = (input, )
         if self.input_shape:
             # for each input remove batch size and replace with one
-            input_size = [[(-1, ) + tuple(oo.size()[1:]) for oo in o] for o in input if o is not None]
             self.summary[m_key][
-                'input_shape'] = input_size
+                'input_shape'] = format_input_output_shape(input)
 
         # Handle multiple outputs
-        if not isinstance(output, (list, tuple)):
-            output = (output, )
-        if not isinstance(output[0], (list, tuple)):
-            output = (output, )
-
-        output_size = [[(-1, ) + tuple(oo.size()[1:]) for oo in o] for o in output if o is not None]
-        self.summary[m_key]['output_shape'] = output_size
+        self.summary[m_key]['output_shape'] = format_input_output_shape(output)
 
         if self.weights:
             self.summary[m_key]['weights'] = list(
                 [tuple(p.size()) for p in module.parameters()])
 
-            # TODO filter to trainable params?
-    #             summary[m_key]['trainable'] = any([p.requires_grad for p in module.parameters()])
-
         if self.nb_trainable:
-            params_trainable = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters() if p.requires_grad])
-            self.summary[m_key]['nb_trainable'] = params_trainable
-        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters()])
-        self.summary[m_key]['nb_params'] = params
+            self.summary[m_key]['nb_trainable'] = get_params(module, True)
+            
+        self.summary[m_key]['nb_params'] = get_params(module, True)
+        
         if self.debug:
             print(self.summary[m_key])
 
@@ -139,8 +144,11 @@ class TorchSummarizeDf(object):
         df = pd.DataFrame.from_dict(self.summary, orient='index')
 
         df['level'] = df['name'].apply(lambda name: name.count('.'))
-        total_toplevel_params = df[df['level'] == df['level'].min()]['nb_params'].sum()
-        print('Total parameters', total_toplevel_params)
+        
+        total_params = get_params(self.model, False)
+        total_trainable_params = get_params(self.model, True)
+        print('Total parameters', total_params)
+        print('Total trainable parameters', total_trainable_params)
 
         return df
 

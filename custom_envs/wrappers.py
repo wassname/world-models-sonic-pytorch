@@ -21,6 +21,7 @@ class ScaledFloatFrame(gym.ObservationWrapper):
 class WarpFrame(gym.ObservationWrapper):
     def __init__(self, env, width=128, height=128, to_gray=True):
         """Warp frames to 84x84 as done in the Nature paper and later work."""
+        # note native sonic size is (224, 320, 3)
         gym.ObservationWrapper.__init__(self, env)
         self.width = width
         self.height = height

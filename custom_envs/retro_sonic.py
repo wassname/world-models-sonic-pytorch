@@ -69,5 +69,18 @@ def make_sonic(game=None, state=None, discrete_actions=False, bk2dir=None):
     env = wrappers.WarpFrame(env, to_gray=False)
     return env
 
+def make_sonic224(game=None, state=None, discrete_actions=False, bk2dir=None):
+    """My function to make the environment."""
+    start_state = train_states.sample().iloc[0]
+    if state is None:
+        state = start_state.state
+    if game is None:
+        game = start_state.game
+    env = make(game=game, state=state)
+    env = wrappers.RewardScaler(env)
+    env = wrappers.ScaledFloatFrame(env)
+    env = wrappers.WarpFrame(env, 224, 224, to_gray=False)
+    return env
+
 
 ACTION_MEANING = dict(enumerate(['B', 'A', 'MODE', 'START', 'UP', 'DOWN', 'LEFT', 'RIGHT', 'C', 'Y', 'X', 'Z']))

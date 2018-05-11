@@ -2,8 +2,11 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch import normal, multinomial
+import torch.distributions
 from torch.autograd import Variable
+import math
 
+eps = 1e-8
 
 class MDNRNN(nn.Module):
     def __init__(self, z_dim, action_dim, hidden_size, n_mixture, temperature):
@@ -47,15 +50,53 @@ class MDNRNN(nn.Module):
         # as inpt?
         concat = torch.cat((inpt, action), dim=-1)
         output, hidden_state = self.rnn(concat, hidden_state)
+        
+        return output, hidden_state
+        
+#     def sample(self, inpt, action, hidden_state=None):
+#         """
+#         Sample from a mixture of Gaussians. This function is only in testing, so batch_size=seq_len=1 for now.
+#         parameters same as forward
+#         :return:
+#         """
+#         # forward and get pi, mean. sigma, hidden_state
+#         output, hidden_state = self.forward(inpt, action, hidden_state)
+#         pi, mean, sigma = self.get_mixture_coef(output)
+        
+# #         pi, mean, sigma, hidden_state = self.forward(inpt, action, hidden_state)
+#         batch_size, seq_len, _ = inpt.size()
+#         pi, mean, sigma = pi.contiguous().view(-1), mean.contiguous().view(-1), sigma.contiguous().view(-1)
+#         # randomly draw a mixture model
+#         k = multinomial(pi, 1)
+
+#         selected_mean = mean[int(self.z_dim * k): int(self.z_dim * (k+1))]
+#         selected_sigma = sigma[int(self.z_dim * k): int(self.z_dim * (k+1))]
+
+#         # sample from normal dist
+#         z_normals = torch.distributions.normal(selected_mean, selected_sigma)
+#         z = z_normals.sample()
+#         z_prob = z_normals.logprob(y_true).exp()
+#         z = normal(selected_mean, selected_sigma)
+#         return z, hidden_state
+
+    def get_mixture_coef(self, output):
+        batch_size, seq_len, _ = output.size()
+        # N, seq_len, n_mixture * z_dim * 2 + n_mixture
         output = output.contiguous()
         output = output.view(-1, self.hidden_size)
-        # N, seq_len, n_mixture * z_dim * 2 + n_mixture
+        
         mixture = self.mdn(output)
         mixture = mixture.view(batch_size, seq_len, -1)
+        
+        ## Split output into mean, sigma, pi
+        
         # N * seq_len, n_mixture * z_dim
         mean = mixture[..., :self.n_mixture * self.z_dim]
         sigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim*2]
         sigma = torch.exp(sigma)
+        
+        # reshape here?
+        
         # N * seq_len, n_mixture
         pi = mixture[..., -self.n_mixture:]
         pi = F.softmax(pi, -1)
@@ -64,28 +105,51 @@ class MDNRNN(nn.Module):
         if self.tau > 0:
             pi /= self.tau
             sigma *= self.tau ** 0.5
-        return pi, mean, sigma, hidden_state
+        return pi, mean, sigma
+    
+    def normal_prob(self, y_true, mu, sigma):
+        """Get prob of a value given a normal dist."""
+        rollout_length = y_true.size(1)
+        
+        # Repeat, for number of repeated mixtures
+        y_true = y_true.repeat((1, 1, self.n_mixture))
+        
+        # Reshape
+        mu = mu.view((-1, rollout_length, self.n_mixture, self.z_dim))
+        sigma = sigma.view((-1, rollout_length, self.n_mixture, self.z_dim))
+        y_true = y_true.view(-1, rollout_length, self.n_mixture, self.z_dim)
 
-    def sample(self, inpt, action, hidden_state=None):
-        """
-        Sample from a mixture of Gaussians. This function is only in testing, so batch_size=seq_len=1 for now.
-        parameters same as forward
-        :return:
-        """
-        # forward and get pi, mean. sigma, hidden_state
-        pi, mean, sigma, hidden_state = self.forward(inpt, action, hidden_state)
-        batch_size, seq_len, _ = inpt.size()
-        pi, mean, sigma = pi.contiguous().view(-1), mean.contiguous().view(-1), sigma.contiguous().view(-1)
-        # randomly draw a mixture model
-        k = multinomial(pi, 1)
+        # Use pytorches normal dist class to calc the probs
+        z_normals = torch.distributions.Normal(mu, sigma)
+        z = z_normals.sample()
+        z_prob = z_normals.log_prob(y_true).exp()
+        return z_prob
 
-        selected_mean = mean[int(self.z_dim * k): int(self.z_dim * (k+1))]
-        selected_sigma = sigma[int(self.z_dim * k): int(self.z_dim * (k+1))]
+    def rnn_r_loss(self, y_true, y_pred):
 
-        # sample from normal dist
-        z = normal(selected_mean, selected_sigma)
-        return z, hidden_state
+        pi, mu, sigma = self.get_mixture_coef(y_pred)
 
+        result = self.normal_prob(y_true, mu, sigma)
+        
+        # result shape [batch, seq, num_mixtures, z_dim]        
+        result = torch.sum(result, dim=3) # sum over latent variable
+        result = result * pi
+        result = torch.sum(result, dim=2) # sum over number of mixtures
+
+        result = -torch.log(result + eps)
+
+        # mean over rollout length and z dim
+        result = result.view((result.size(0), -1)).mean(1)
+
+        return result
+
+    def rnn_kl_loss(self, y_true, y_pred):
+        pi, mu, sigma = self.get_mixture_coef(y_pred)
+        kl_loss = - 0.5 * torch.mean(1 + torch.log(torch.pow(sigma, 2)) - torch.pow(mu, 2) - torch.pow(sigma, 2))
+        return kl_loss
+
+    def rnn_loss(self, y_true, y_pred):
+        return self.rnn_r_loss(y_true, y_pred) + self.rnn_kl_loss(y_true, y_pred)
 
 # if __name__ == '__main__':
 #     from torch.autograd import Variable
