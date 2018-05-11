@@ -7,6 +7,7 @@ from torch.autograd import Variable
 import math
 
 eps = 1e-8
+logeps = math.log(eps)
 
 class MDNRNN(nn.Module):
     def __init__(self, z_dim, action_dim, hidden_size, n_mixture, temperature):
@@ -122,10 +123,12 @@ class MDNRNN(nn.Module):
         # Use pytorches normal dist class to calc the probs
         z_normals = torch.distributions.Normal(mu, sigma)
         z = z_normals.sample()
-        z_prob = z_normals.log_prob(y_true).exp()
+        z_prob = z_normals.log_prob(y_true).clamp(logeps, -logeps).exp()
         return z_prob
 
     def rnn_r_loss(self, y_true, y_pred):
+        
+        # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
 
         pi, mu, sigma = self.get_mixture_coef(y_pred)
 
@@ -145,11 +148,17 @@ class MDNRNN(nn.Module):
 
     def rnn_kl_loss(self, y_true, y_pred):
         pi, mu, sigma = self.get_mixture_coef(y_pred)
-        kl_loss = - 0.5 * torch.mean(1 + torch.log(torch.pow(sigma, 2)) - torch.pow(mu, 2) - torch.pow(sigma, 2))
+        kl_loss = - 0.5 * torch.mean(1 + torch.log(torch.pow(sigma, 2)) - torch.pow(mu, 2) - torch.pow(sigma, 2), 1).mean(1)
         return kl_loss
 
-    def rnn_loss(self, y_true, y_pred):
-        return self.rnn_r_loss(y_true, y_pred) + self.rnn_kl_loss(y_true, y_pred)
+    def rnn_loss(self, y_true, y_pred, verbose=False):
+        r_loss = self.rnn_r_loss(y_true, y_pred)
+        kl_loss = self.rnn_kl_loss(y_true, y_pred)
+        if verbose:
+            print(r_loss.shape, kl_loss.shape)
+            print(r_loss, kl_loss)
+            print(r_loss.sum(), kl_loss.sum())
+        return r_loss #+ kl_loss
 
 # if __name__ == '__main__':
 #     from torch.autograd import Variable

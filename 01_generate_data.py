@@ -92,7 +92,7 @@ if __name__ == "__main__":
     parser.add_argument('--start_batch', type=int, default=0, help='start_batch number')
     parser.add_argument('--time_steps', type=int, default=300, help='how many timesteps at start of episode?')
     parser.add_argument('--render', action='store_true', help='render the env as data is generated')
-    parser.add_argument('--batch_size', type=int, default=20, help='how many episodes in a batch (one file)')
+    parser.add_argument('--batch_size', type=int, default=10, help='how many episodes in a batch (one file)')
     parser.add_argument('--run_all_envs', action='store_true', help='if true, will ignore env_name and loop over all envs in train_envs variables in config.py')
 
     args = parser.parse_args()
