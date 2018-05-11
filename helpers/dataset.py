@@ -34,20 +34,21 @@ class TQDMDaskProgressBar(Callback):
 
 
 @dask.delayed
-def load_npz(filename):
+def load_npz(filename, shuffle=False):
     data_f = np.load(filename)
     data = [v for _, v in data_f.items()][0]
     data = np.concatenate(data, 0)
 
     # shuffle it
-    inds = np.arange(len(data))
-    np.random.shuffle(inds)
-    data = data[inds]
+    if shuffle:
+        inds = np.arange(len(data))
+        np.random.shuffle(inds)
+        data = data[inds]
     return data
 
 
-def load_npzs(filenames):
-    lazy_values = [load_npz(url) for url in filenames]     # Lazily evaluate imread on each url
+def load_npzs(filenames, shuffle=False):
+    lazy_values = [load_npz(url, shuffle=shuffle) for url in filenames]     # Lazily evaluate imread on each url
 
     sample = lazy_values[0].compute()
     arrays = [da.from_delayed(lazy_value,           # Construct a small Dask array

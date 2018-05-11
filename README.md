@@ -4,9 +4,14 @@ Link: https://arxiv.org/pdf/1803.10122.pdf
 
 ## The work is in progress
 
-- https://github.com/AppliedDataSciencePartners/WorldModels
-- https://github.com/JunhongXu/world-models-pytorch
-- https://github.com/goolulusaurs/WorldModels
+- implementations
+    - https://github.com/AppliedDataSciencePartners/WorldModels
+    - https://github.com/JunhongXu/world-models-pytorch
+    - https://github.com/goolulusaurs/WorldModels
+    - https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
+
+links:
+- https://discordapp.com/channels/427882398005329921/
 
 TODOs
 

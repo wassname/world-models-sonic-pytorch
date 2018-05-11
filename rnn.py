@@ -31,7 +31,7 @@ class MDNRNN(nn.Module):
         self.rnn = nn.LSTM(input_size=self.inpt_size, hidden_size=hidden_size, batch_first=True)
 
         # define MDN as fully connected layer
-        self.mdn = nn.Linear(hidden_size, n_mixture * z_dim * 2 + n_mixture)
+        self.mdn = nn.Linear(hidden_size, n_mixture * z_dim * 3)
         self.tau = temperature
 
     def forward(self, inpt, action, hidden_state=None):
@@ -51,34 +51,8 @@ class MDNRNN(nn.Module):
         # as inpt?
         concat = torch.cat((inpt, action), dim=-1)
         output, hidden_state = self.rnn(concat, hidden_state)
-        
-        return output, hidden_state
-        
-#     def sample(self, inpt, action, hidden_state=None):
-#         """
-#         Sample from a mixture of Gaussians. This function is only in testing, so batch_size=seq_len=1 for now.
-#         parameters same as forward
-#         :return:
-#         """
-#         # forward and get pi, mean. sigma, hidden_state
-#         output, hidden_state = self.forward(inpt, action, hidden_state)
-#         pi, mean, sigma = self.get_mixture_coef(output)
-        
-# #         pi, mean, sigma, hidden_state = self.forward(inpt, action, hidden_state)
-#         batch_size, seq_len, _ = inpt.size()
-#         pi, mean, sigma = pi.contiguous().view(-1), mean.contiguous().view(-1), sigma.contiguous().view(-1)
-#         # randomly draw a mixture model
-#         k = multinomial(pi, 1)
-
-#         selected_mean = mean[int(self.z_dim * k): int(self.z_dim * (k+1))]
-#         selected_sigma = sigma[int(self.z_dim * k): int(self.z_dim * (k+1))]
-
-#         # sample from normal dist
-#         z_normals = torch.distributions.normal(selected_mean, selected_sigma)
-#         z = z_normals.sample()
-#         z_prob = z_normals.logprob(y_true).exp()
-#         z = normal(selected_mean, selected_sigma)
-#         return z, hidden_state
+        pi, mean, sigma = self.get_mixture_coef(output)
+        return pi, mean, sigma, hidden_state
 
     def get_mixture_coef(self, output):
         batch_size, seq_len, _ = output.size()
@@ -89,76 +63,57 @@ class MDNRNN(nn.Module):
         mixture = self.mdn(output)
         mixture = mixture.view(batch_size, seq_len, -1)
         
-        ## Split output into mean, sigma, pi
+        ## Split output into mean, logsigma, pi
         
-        # N * seq_len, n_mixture * z_dim
-        mean = mixture[..., :self.n_mixture * self.z_dim]
-        sigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim*2]
-        sigma = torch.exp(sigma)
+        # N * seq_len
+        mu = mixture[..., :self.n_mixture * self.z_dim]
+        logsigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim*2]
+        pi = mixture[..., self.n_mixture * self.z_dim*2:self.n_mixture * self.z_dim*3]
         
-        # reshape here?
+        # Reshape
+        mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
+        logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim))
+        pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim))
         
-        # N * seq_len, n_mixture
-        pi = mixture[..., -self.n_mixture:]
-        pi = F.softmax(pi, -1)
+        # Transform
+        sigma = torch.exp(logsigma)
+        pi = F.softmax(pi, 2)  # Weights over n_mixtures should sum to one
 
         # add temperature
         if self.tau > 0:
             pi /= self.tau
             sigma *= self.tau ** 0.5
-        return pi, mean, sigma
+
+        return pi, mu, sigma
     
-    def normal_prob(self, y_true, mu, sigma):
-        """Get prob of a value given a normal dist."""
+    def normal_prob(self, y_true, mu, sigma, pi):
+        """Probability of a value given the distribution."""
         rollout_length = y_true.size(1)
         
         # Repeat, for number of repeated mixtures
-        y_true = y_true.repeat((1, 1, self.n_mixture))
+        y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
         
-        # Reshape
-        mu = mu.view((-1, rollout_length, self.n_mixture, self.z_dim))
-        sigma = sigma.view((-1, rollout_length, self.n_mixture, self.z_dim))
-        y_true = y_true.view(-1, rollout_length, self.n_mixture, self.z_dim)
-
         # Use pytorches normal dist class to calc the probs
-        z_normals = torch.distributions.Normal(mu, sigma)
-        z = z_normals.sample()
+        z_normals = torch.distributions.Normal(mu, sigma.clamp(eps))
         z_prob = z_normals.log_prob(y_true).clamp(logeps, -logeps).exp()
-        return z_prob
+        return (z_prob * pi).sum(2) # weight, then sum over the mixtures
 
-    def rnn_r_loss(self, y_true, y_pred):
-        
+    def rnn_r_loss(self, y_true, pi, mu, sigma):
         # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
+        # and https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
 
-        pi, mu, sigma = self.get_mixture_coef(y_pred)
+        # probability shape [batch, seq, num_mixtures, z_dim]  
+        prob = self.normal_prob(y_true, mu, sigma, pi)
+        loss = -torch.log(prob + eps)
 
-        result = self.normal_prob(y_true, mu, sigma)
-        
-        # result shape [batch, seq, num_mixtures, z_dim]        
-        result = torch.sum(result, dim=3) # sum over latent variable
-        result = result * pi
-        result = torch.sum(result, dim=2) # sum over number of mixtures
+        # mean over seq and z dim and num_mixtures
+        batch_size = y_true.size(0)
+        loss = loss.view((batch_size, -1)).mean(1)
+        return loss
 
-        result = -torch.log(result + eps)
-
-        # mean over rollout length and z dim
-        result = result.view((result.size(0), -1)).mean(1)
-
-        return result
-
-    def rnn_kl_loss(self, y_true, y_pred):
-        pi, mu, sigma = self.get_mixture_coef(y_pred)
-        kl_loss = - 0.5 * torch.mean(1 + torch.log(torch.pow(sigma, 2)) - torch.pow(mu, 2) - torch.pow(sigma, 2), 1).mean(1)
-        return kl_loss
-
-    def rnn_loss(self, y_true, y_pred, verbose=False):
-        r_loss = self.rnn_r_loss(y_true, y_pred)
-        kl_loss = self.rnn_kl_loss(y_true, y_pred)
-        if verbose:
-            print(r_loss.shape, kl_loss.shape)
-            print(r_loss, kl_loss)
-            print(r_loss.sum(), kl_loss.sum())
-        return r_loss #+ kl_loss
+    def rnn_loss(self, y_true, pi, mu, sigma):
+        r_loss = self.rnn_r_loss(y_true, pi, mu, sigma)
+        return r_loss
 
 # if __name__ == '__main__':
 #     from torch.autograd import Variable
