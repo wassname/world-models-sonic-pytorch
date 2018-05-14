@@ -101,6 +101,7 @@ class MDNRNN(nn.Module):
     def rnn_r_loss(self, y_true, pi, mu, sigma):
         # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
         # and https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
+        # and https://github.com/JunhongXu/world-models-pytorch
 
         # probability shape [batch, seq, num_mixtures, z_dim]  
         prob = self.normal_prob(y_true, mu, sigma, pi)

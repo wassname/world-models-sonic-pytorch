@@ -4,7 +4,7 @@ Link: https://arxiv.org/pdf/1803.10122.pdf
 
 ## The work is in progress
 
-- implementations
+- implementations, which I got code and ideas from
     - https://github.com/AppliedDataSciencePartners/WorldModels
     - https://github.com/JunhongXu/world-models-pytorch
     - https://github.com/goolulusaurs/WorldModels
