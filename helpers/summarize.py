@@ -5,40 +5,6 @@ import pandas as pd
 import torch
 from torch import nn
 
-
-def get_names_dict(model):
-    """Recursive walk to get names including path."""
-    names = {}
-
-    def _get_names(module, parent_name=''):
-        for key, module in module.named_children():
-            name = parent_name + '.' + key if parent_name else key
-            names[name] = module
-            if isinstance(module, torch.nn.Module):
-                _get_names(module, parent_name=name)
-    _get_names(model)
-    return names
-
-def get_params(module, nb_trainable=False):
-    if nb_trainable:
-        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters() if p.requires_grad])
-    else:
-        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters()])
-    if isinstance(params, torch.Tensor):
-        params = params.item()
-    return params
-
-def format_input_output_shape(tensors):
-    # TODO make recursive deal with N levels of inputs
-    if not isinstance(tensors, (list, tuple)):
-        tensors = (tensors, )
-    if not isinstance(tensors[0], (list, tuple)):
-        tensors = (tensors, )
-    # for each input remove batch size and replace with -1
-    input_size = [[(-1, ) + tuple(oo.size()[1:]) for oo in o] for o in tensors if o is not None]
-    return input_size
-
-
 class TorchSummarizeDf(object):
     def __init__(self, model, weights=False, input_shape=True, nb_trainable=False, debug=False):
         """
@@ -165,3 +131,38 @@ class TorchSummarizeDf(object):
         # remove these hooks
         for h in self.hooks:
             h.remove()
+
+
+def get_names_dict(model):
+    """Recursive walk to get names including path."""
+    names = {}
+
+    def _get_names(module, parent_name=''):
+        for key, module in module.named_children():
+            name = parent_name + '.' + key if parent_name else key
+            names[name] = module
+            if isinstance(module, torch.nn.Module):
+                _get_names(module, parent_name=name)
+    _get_names(model)
+    return names
+
+def get_params(module, nb_trainable=False):
+    if nb_trainable:
+        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters() if p.requires_grad])
+    else:
+        params = sum([torch.LongTensor(list(p.size())).prod() for p in module.parameters()])
+    if isinstance(params, torch.Tensor):
+        params = params.item()
+    return params
+
+def format_input_output_shape(tensors):
+    "Recursivly get N nested levels of inputs."""
+    def _format_input_output_shape(tensors):
+        if isinstance(tensors, (list, tuple)):
+            input_shape = [_format_input_output_shape(tensor) for tensor in tensors]
+            if len(input_shape)==1:
+                input_shape=input_shape[0]
+            return input_shape
+        else:
+            return [(-1, ) + tuple(o.size()) for o in tensors if o is not None]
+    return _format_input_output_shape(tensors)
