@@ -79,8 +79,8 @@ def main(args):
                 env.close()
 
             print("Saving dataset for batch {}".format(batch))
-            np.savez('./data/vae/obs_data_' + current_env_name + '_' + str(batch), obs_data)
-            np.savez('./data/vae/action_data_' + current_env_name + '_' + str(batch), action_data)
+            np.savez('/data/vae/obs_data_' + current_env_name + '_' + str(batch), obs_data)
+            np.savez('/data/vae/action_data_' + current_env_name + '_' + str(batch), action_data)
 
             batch = batch + 1
 
