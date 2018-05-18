@@ -42,6 +42,8 @@ def main(args):
         while s < total_episodes:
             obs_data = []
             action_data = []
+            reward_data = []
+            done_data = []
 
             for i_episode in range(batch_size):
                 env = make_env(current_env_name)
@@ -54,6 +56,8 @@ def main(args):
                 t = 0
                 obs_sequence = []
                 action_sequence = []
+                reward_sequence = []
+                done_sequence = []
 
                 while t < time_steps:  # and not done:
                     t = t + 1
@@ -63,14 +67,18 @@ def main(args):
 
                     obs_sequence.append(observation)
                     action_sequence.append(action)
-
+                 
                     observation, reward, done, info = env.step(action)
+                    reward_sequence.append(reward)
+                    done_sequence.append(done)
 
                     if render:
                         env.render()
 
                 obs_data.append(obs_sequence)
                 action_data.append(action_sequence)
+                reward_data.append(reward_sequence)
+                done_data.append(done_sequence)
 
                 print("Batch {} Episode {} finished after {} timesteps".format(batch, i_episode, t + 1))
                 print("Current dataset contains {} observations".format(sum(map(len, obs_data))))
@@ -81,6 +89,8 @@ def main(args):
             print("Saving dataset for batch {}".format(batch))
             np.savez('/data/vae/obs_data_' + current_env_name + '_' + str(batch), obs_data)
             np.savez('/data/vae/action_data_' + current_env_name + '_' + str(batch), action_data)
+            np.savez('/data/vae/reward_data_' + current_env_name + '_' + str(batch), reward_data)
+            np.savez('/data/vae/done_data_' + current_env_name + '_' + str(batch), done_data)
 
             batch = batch + 1
 
