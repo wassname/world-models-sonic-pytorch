@@ -67,10 +67,10 @@ def main(args):
 
                     obs_sequence.append(observation)
                     action_sequence.append(action)
+                 
+                    observation, reward, done, info = env.step(action)
                     reward_sequence.append(reward)
                     done_sequence.append(done)
-
-                    observation, reward, done, info = env.step(action)
 
                     if render:
                         env.render()

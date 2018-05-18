@@ -24,67 +24,6 @@ class ConvBlock4(torch.nn.Module):
         x = self.act(x)
         return x
     
-class BasicConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
-        super(BasicConv2d, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.act = nn.LeakyReLU(inplace=True)
-        
-        # Init
-        gain = nn.init.calculate_gain('leaky_relu')
-        nn.init.xavier_uniform_(self.conv.weight, gain=gain)
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.bn(x)
-        return self.act(x)
-    
-class InceptionA(nn.Module):
-
-    def __init__(self, in_channels, out_channels):
-        super(InceptionA, self).__init__()
-        base_channels = out_channels//16
-        self.branch1x1 = BasicConv2d(in_channels, base_channels*4, kernel_size=1)
-
-        self.branch5x5_1 = BasicConv2d(in_channels, base_channels*3, kernel_size=1)
-        self.branch5x5_2 = BasicConv2d(base_channels*3, base_channels*4, kernel_size=5, padding=2)
-
-        self.branch3x3dbl_1 = BasicConv2d(in_channels, base_channels*4, kernel_size=1)
-        self.branch3x3dbl_2 = BasicConv2d(base_channels*4, base_channels*6, kernel_size=3, padding=1)
-        self.branch3x3dbl_3 = BasicConv2d(base_channels*6, base_channels*6, kernel_size=3, padding=1)
-
-        self.branch_pool = BasicConv2d(in_channels, base_channels*2, kernel_size=1)
-
-    def forward(self, x):
-        branch1x1 = self.branch1x1(x)
-
-        branch5x5 = self.branch5x5_1(x)
-        branch5x5 = self.branch5x5_2(branch5x5)
-
-        branch3x3dbl = self.branch3x3dbl_1(x)
-        branch3x3dbl = self.branch3x3dbl_2(branch3x3dbl)
-        branch3x3dbl = self.branch3x3dbl_3(branch3x3dbl)
-
-        branch_pool = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
-        branch_pool = self.branch_pool(branch_pool)
-
-        outputs = [branch1x1, branch5x5, branch3x3dbl, branch_pool]
-        return torch.cat(outputs, 1)
-    
-
-class ConvBlock5(torch.nn.Module):
-    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
-        super().__init__()
-        self.conv0 = InceptionA(in_channels=inpt_kernel, out_channels=inpt_kernel)
-        self.conv1 = BasicConv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.conv2 = BasicConv2d(in_channels=output_kernel, out_channels=output_kernel, kernel_size=1) # 1x1
-
-    def forward(self, x):
-        x = self.conv0(x)
-        x = self.conv1(x)
-        x = self.conv2(x)
-        return x
     
 class DeconvBlock4(torch.nn.Module):
     def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
@@ -103,37 +42,8 @@ class DeconvBlock4(torch.nn.Module):
 #         x = self.drp(x)
         x = self.act(x)
         return x
+
     
-class BasicDeConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, **kwargs):
-        super(BasicConv2d, self).__init__()
-        self.conv = nn.ConvTranspose2d(in_channels, out_channels, **kwargs)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.act = nn.LeakyReLU(inplace=True)
-        
-        # Init
-        gain = nn.init.calculate_gain('leaky_relu')
-        nn.init.xavier_uniform_(self.conv.weight, gain=gain)
-
-    def forward(self, x):
-        x = self.conv(x)
-        x = self.bn(x)
-        return self.act(x)
-    
-class DeconvBlock5(torch.nn.Module):
-    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
-        super().__init__()
-        self.conv0 = InceptionA(inpt_kernel, inpt_kernel)
-        self.deconv1 = BasicDeConv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride, padding=padding)
-        self.conv2 = BasicConv2d(output_kernel, output_kernel)
-
-    def forward(self, x):
-        x = self.conv0(x)
-        x = self.deconv1(x)
-        x = self.conv1(x)
-        return x
-
-
 class VAE5(nn.Module):
     """
     VAE. Vector Quantised Variational Auto-Encoder.
@@ -230,7 +140,101 @@ class VAE5(nn.Module):
             return mu
         
 
-class VAE5(nn.Module):
+class BasicConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.act = nn.LeakyReLU(inplace=True)
+        
+        # Init
+        gain = nn.init.calculate_gain('leaky_relu')
+        nn.init.xavier_uniform_(self.conv.weight, gain=gain)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return self.act(x)
+    
+class InceptionA(nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super(InceptionA, self).__init__()
+        base_channels = out_channels//16
+        self.branch1x1 = BasicConv2d(in_channels, base_channels*4, kernel_size=1)
+
+        self.branch5x5_1 = BasicConv2d(in_channels, base_channels*3, kernel_size=1)
+        self.branch5x5_2 = BasicConv2d(base_channels*3, base_channels*4, kernel_size=5, padding=2)
+
+        self.branch3x3dbl_1 = BasicConv2d(in_channels, base_channels*4, kernel_size=1)
+        self.branch3x3dbl_2 = BasicConv2d(base_channels*4, base_channels*6, kernel_size=3, padding=1)
+        self.branch3x3dbl_3 = BasicConv2d(base_channels*6, base_channels*6, kernel_size=3, padding=1)
+
+        self.branch_pool = BasicConv2d(in_channels, base_channels*2, kernel_size=1)
+
+    def forward(self, x):
+        branch1x1 = self.branch1x1(x)
+
+        branch5x5 = self.branch5x5_1(x)
+        branch5x5 = self.branch5x5_2(branch5x5)
+
+        branch3x3dbl = self.branch3x3dbl_1(x)
+        branch3x3dbl = self.branch3x3dbl_2(branch3x3dbl)
+        branch3x3dbl = self.branch3x3dbl_3(branch3x3dbl)
+
+        branch_pool = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
+        branch_pool = self.branch_pool(branch_pool)
+
+        outputs = [branch1x1, branch5x5, branch3x3dbl, branch_pool]
+        return torch.cat(outputs, 1)
+    
+
+    
+class BasicDeConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super().__init__()
+        self.conv = nn.ConvTranspose2d(in_channels, out_channels, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.act = nn.LeakyReLU(inplace=True)
+        
+        # Init
+        gain = nn.init.calculate_gain('leaky_relu')
+        nn.init.xavier_uniform_(self.conv.weight, gain=gain)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        return self.act(x)
+    
+
+class ConvBlock5(torch.nn.Module):
+    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
+        super().__init__()
+        self.conv0 = InceptionA(in_channels=inpt_kernel, out_channels=inpt_kernel)
+        self.conv1 = BasicConv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride, padding=padding)
+        self.conv2 = BasicConv2d(in_channels=output_kernel, out_channels=output_kernel, kernel_size=1) # 1x1
+
+    def forward(self, x):
+        x = self.conv0(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+    
+class DeconvBlock5(torch.nn.Module):
+    def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
+        super().__init__()
+        self.conv0 = InceptionA(inpt_kernel, inpt_kernel)
+        self.deconv1 = BasicDeConv2d(in_channels=inpt_kernel, out_channels=output_kernel, kernel_size=kernel_size, stride=stride, padding=padding)
+        self.conv2 = BasicConv2d(output_kernel, output_kernel, kernel_size=1)
+
+    def forward(self, x):
+        x = self.conv0(x)
+        x = self.deconv1(x)
+        x = self.conv2(x)
+        return x
+    
+
+class VAE6(nn.Module):
     """
     VAE. Vector Quantised Variational Auto-Encoder.
 
@@ -266,7 +270,7 @@ class VAE5(nn.Module):
 
         # Encoder (increasing #filter linearly)
         layers = []
-        layers.append(ConvBlock5(3, conv_dim, kernel_size=3, padding=1))
+        layers.append(BasicConv2d(3, conv_dim, kernel_size=3, padding=1))
 
         repeat_num = int(math.log2(image_size / code_dim))
         curr_dim = conv_dim
@@ -275,7 +279,7 @@ class VAE5(nn.Module):
             curr_dim = conv_dim * (i + 2)
 
         # Now we have (code_dim,code_dim,curr_dim)
-        layers.append(nn.Conv2d(curr_dim, z_dim, kernel_size=1))
+        layers.append(BasicConv2d(curr_dim, z_dim, kernel_size=1))
 
         # (code_dim,code_dim,z_dim)
         self.encoder = nn.Sequential(*layers)
