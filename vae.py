@@ -279,7 +279,8 @@ class VAE6(nn.Module):
             curr_dim = conv_dim * (i + 2)
 
         # Now we have (code_dim,code_dim,curr_dim)
-        layers.append(BasicConv2d(curr_dim, z_dim, kernel_size=1))
+#         layers.append(BasicConv2d(curr_dim, z_dim, kernel_size=1))
+        layers.append(ConvBlock5(curr_dim, z_dim, kernel_size=1, stride=1, padding=0))
 
         # (code_dim,code_dim,z_dim)
         self.encoder = nn.Sequential(*layers)
@@ -294,6 +295,7 @@ class VAE6(nn.Module):
             curr_dim = conv_dim * (i + 1)
 
         layers.append(nn.Conv2d(curr_dim, 3, kernel_size=3, padding=1))
+#         layers.append(ConvBlock5(curr_dim, 3, kernel_size=3, stride=1, padding=1))
         self.decoder = nn.Sequential(*layers)
 
         self.sigmoid = nn.Sigmoid()

@@ -1,9 +1,11 @@
 # xvfb-run -s "-screen 0 1400x900x24" python generate_data.py sonic
 
 import numpy as np
-from custom_envs.env import make_env
-
+import os
 import argparse
+
+from custom_envs.env import make_env
+import config
 
 
 def generate_data_action(t, current_action):
@@ -86,18 +88,19 @@ def main(args):
                 s = s + 1
                 env.close()
 
+            print(config.base_vae_data_dir)
             print("Saving dataset for batch {}".format(batch))
-            np.savez('/data/vae/obs_data_' + current_env_name + '_' + str(batch), obs_data)
-            np.savez('/data/vae/action_data_' + current_env_name + '_' + str(batch), action_data)
-            np.savez('/data/vae/reward_data_' + current_env_name + '_' + str(batch), reward_data)
-            np.savez('/data/vae/done_data_' + current_env_name + '_' + str(batch), done_data)
+            np.savez(os.path.join(config.base_vae_data_dir, 'obs_data_' + current_env_name + '_' + str(batch)), obs_data)
+            np.savez(os.path.join(config.base_vae_data_dir, 'action_data_' + current_env_name + '_' + str(batch)), action_data)
+            np.savez(os.path.join(config.base_vae_data_dir, 'reward_data_' + current_env_name + '_' + str(batch)), reward_data)
+            np.savez(os.path.join(config.base_vae_data_dir, 'done_data_' + current_env_name + '_' + str(batch)), done_data)
 
             batch = batch + 1
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=('Create new training data'))
-    parser.add_argument('env_name', type=str, help='name of environment')
+    parser.add_argument('env_name', type=str, default='sonc256', help='name of environment')
     parser.add_argument('--total_episodes', type=int, default=2000, help='total number of episodes to generate')
     parser.add_argument('--start_batch', type=int, default=0, help='start_batch number')
     parser.add_argument('--time_steps', type=int, default=300, help='how many timesteps at start of episode?')
