@@ -97,6 +97,15 @@ class MDNRNN(nn.Module):
         z_normals = torch.distributions.Normal(mu, sigma.clamp(eps))
         z_prob = z_normals.log_prob(y_true).clamp(logeps, -logeps).exp()
         return (z_prob * pi).sum(2) # weight, then sum over the mixtures
+    
+    def sample(self, pi, mu, sigma):
+        """Sample z from Z."""
+        z_normals = torch.distributions.Normal(mu, sigma.clamp(eps))
+        if self.training:
+            z_sample = z_normals.rsample()
+        else:
+            z_sample = z_normals.sample()
+        return (z_sample * pi).sum(2) # sum over mixtures
 
     def rnn_r_loss(self, y_true, pi, mu, sigma):
         # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
@@ -115,18 +124,3 @@ class MDNRNN(nn.Module):
     def rnn_loss(self, y_true, pi, mu, sigma):
         r_loss = self.rnn_r_loss(y_true, pi, mu, sigma)
         return r_loss
-
-# if __name__ == '__main__':
-#     from torch.autograd import Variable
-#     z_dim, action_dim, hidden_size, n_mixture, temp = 32, 2, 256, 5, 0.0
-#     batch_size = 1
-#     seq_len = 1
-#     mdnrnn = MDNRNN(z_dim, action_dim, hidden_size, n_mixture, temp)
-#     mdnrnn.cuda()
-#     prev_z = Variable(torch.randn(batch_size, seq_len, z_dim)).cuda()
-#     action = Variable(torch.randn(batch_size, seq_len, action_dim)).cuda()
-#
-#     new_z, new_hidden_state = mdnrnn.sample(prev_z, action)
-#     print(new_z)
-#     pi, mean, sigma, hidden_state = mdnrnn.forward(prev_z, action)
-#     print(sigma)
