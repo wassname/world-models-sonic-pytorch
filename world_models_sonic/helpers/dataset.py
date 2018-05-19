@@ -4,11 +4,10 @@ from tqdm import tqdm_notebook
 import torch.utils.data
 import numpy as np
 import dask.array as da
-import h5py
 import os
-import torch.utils.data
-import glob
+import zarr
 
+from world_models_sonic import config
 from .samplers import SequenceInChunkSampler
 
 
@@ -39,34 +38,6 @@ class TQDMDaskProgressBar(Callback):
         self._tqdm.close()
 
 
-@dask.delayed
-def load_npz(filename, shuffle=False):
-    data_f = np.load(filename)
-    data = [v for _, v in data_f.items()][0]
-    data = np.concatenate(data, 0)
-
-    # shuffle it
-    if shuffle:
-        inds = np.arange(len(data))
-        np.random.shuffle(inds)
-        data = data[inds]
-    return data
-
-
-def load_npzs(filenames, shuffle=False):
-    lazy_values = [load_npz(url, shuffle=shuffle) for url in filenames]     # Lazily evaluate imread on each url
-
-    sample = lazy_values[0].compute()
-    arrays = [da.from_delayed(lazy_value,           # Construct a small Dask array
-                              dtype=sample.dtype,   # for every lazy value
-                              shape=sample.shape)
-              for lazy_value in lazy_values]
-    print(sample.shape)
-    stack = da.concatenate(arrays, axis=0)
-    del sample
-    return stack
-
-
 class NumpyDataset(torch.utils.data.Dataset):
     """Dataset wrapping arrays.
 
@@ -87,61 +58,50 @@ class NumpyDataset(torch.utils.data.Dataset):
         return self.arrays[0].shape[0]
 
 
+def load_cache_data(basedir=config.base_vae_data_dir, env_name='sonic256', data_cache_file='/tmp/sonic_vae.hdf5', chunksize=None, action_dim=12, seq_len=1, batch_size=16):
 
+    # load zarr arrays
+    z_obs = zarr.open(os.path.join(basedir, 'obs_data.zarr'), mode='r')
+    z_act = zarr.open(os.path.join(basedir, 'action_data.zarr'), mode='r')
+    z_don = zarr.open(os.path.join(basedir, 'done_data.zarr'), mode='r')
+    z_rew = zarr.open(os.path.join(basedir, 'reward_data.zarr'), mode='r')
+    print(z_obs, z_act, z_don, z_rew)
 
-def load_cache_data(basedir='/data/vae', env_name='sonic256', data_cache_file='/tmp/sonic_vae.hdf5', image_size=256, chunksize=10, action_dim=12, seq_len=1, batch_size=16):
+    # Load into dask
+    z_obs = (da.from_array(z_obs, z_obs.chunks) / 255.).astype(np.float32)
+    z_act = da.from_array(z_act, z_act.chunks)
+    z_don = da.from_array(z_don, z_don.chunks)
+    z_rew = da.from_array(z_rew, z_rew.chunks)
+    print('z_obs', z_obs)
+    print('z_act', z_act)
+    print('z_don', z_don)
+    print('z_rew', z_rew)
 
-    if not os.path.isfile(data_cache_file):
-        filenames = sorted(glob.glob(os.path.join(basedir, 'obs_data_' + env_name + '_*.npz')))
-        filenames_actions = sorted(glob.glob(os.path.join(basedir, 'action_data_' + env_name + '_*.npz')))
-        filenames_rewards = sorted(glob.glob(os.path.join(basedir, 'reward_data_' + env_name + '_*.npz')))
-        filenames_dones = sorted(glob.glob(os.path.join(basedir, 'done_data_' + env_name + '_*.npz')))
-        assert len(filenames)==len(filenames_actions)
-        assert len(filenames)==len(filenames_rewards)
-        assert len(filenames)==len(filenames_dones)
-        data_train = load_npzs(filenames, shuffle=False)
-        with TQDMDaskProgressBar():
-            da.to_hdf5(data_cache_file, '/x', data_train)
+    if chunksize is None:
+        chunksize = z_obs.chunks
 
-        y_train = load_npzs(filenames_actions, shuffle=False)
-        with TQDMDaskProgressBar():
-            da.to_hdf5(data_cache_file, '/actions', y_train)
-
-        r_train = load_npzs(filenames_rewards, shuffle=False)
-        with TQDMDaskProgressBar():
-            da.to_hdf5(data_cache_file, '/rewards', r_train)
-
-        d_train = load_npzs(filenames_dones, shuffle=False)
-        with TQDMDaskProgressBar():
-            da.to_hdf5(data_cache_file, '/dones', d_train)
-        print(data_train, y_train, r_train, d_train)
-
-    # load
-    observations = da.from_array(h5py.File(data_cache_file, mode='r')['x'], chunks=(chunksize, image_size, image_size, 3))
-    actions = da.from_array(h5py.File(data_cache_file, mode='r')['actions'], chunks=(chunksize, action_dim)).astype(np.uint8)
-    rewards = da.from_array(h5py.File(data_cache_file, mode='r')['rewards'], chunks=(chunksize, ))[:, None].astype(np.float32)
-    dones = da.from_array(h5py.File(data_cache_file, mode='r')['dones'], chunks=(chunksize, ))[:, None].astype(np.uint8)
-    data_split = int(len(observations)*0.8)
+    data_split = int(len(z_obs) * 0.8)
 
     # put cached data into pytorch loaders
-    dataset_train = NumpyDataset(observations[:data_split], actions[:data_split], rewards[:data_split], dones[:data_split])
+    dataset_train = NumpyDataset(z_obs[:data_split], z_act[:data_split], z_rew[:data_split], z_don[:data_split])
     loader_train = torch.utils.data.DataLoader(
         dataset_train,
         sampler=SequenceInChunkSampler(dataset_train, seq_len=seq_len, chunksize=chunksize),
         pin_memory=True,
         shuffle=False,
-        batch_size=batch_size*seq_len,
+        batch_size=batch_size * seq_len,
         drop_last=True
     )
 
-    dataset_test = NumpyDataset(observations[data_split:], actions[data_split:], rewards[data_split:], dones[data_split:])
+    dataset_test = NumpyDataset(z_obs[data_split:], z_act[data_split:], z_rew[data_split:], z_don[data_split:])
     loader_test = torch.utils.data.DataLoader(
         dataset_test,
         sampler=SequenceInChunkSampler(dataset_test, seq_len=seq_len, chunksize=chunksize),
         pin_memory=True,
         shuffle=False,
-        batch_size=batch_size*seq_len,
+        batch_size=batch_size * seq_len,
         drop_last=True
     )
+    print(dataset_train, dataset_test)
 
     return loader_train, loader_test

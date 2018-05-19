@@ -2,6 +2,7 @@ import numpy as np
 import gym
 from gym import spaces
 import cv2
+import time
 cv2.ocl.setUseOpenCL(False)
 
 
@@ -16,6 +17,21 @@ class ScaledFloatFrame(gym.ObservationWrapper):
         # careful! This undoes the memory optimization, use
         # with smaller replay buffers only.
         return np.array(observation).astype(np.float32) / 255.0
+
+
+class SlowFrames(gym.Wrapper):
+    def __init__(self, env, fps=60 * 4, frames_per_timestep=4):
+        super().__init__(env)
+        self.t0 = time.time()
+        self.ms_per_step = frames_per_timestep / fps
+
+    def render(self, mode='human'):
+        # Note: one timestep is 4 frames
+        time_passed = time.time() - self.t0
+        if time_passed < self.ms_per_step:
+            time.sleep(self.ms_per_step - time_passed)
+        self.t0 = time.time()
+        return self.env.render(mode)
 
 
 class WarpFrame(gym.ObservationWrapper):

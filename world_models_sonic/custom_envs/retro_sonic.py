@@ -41,7 +41,8 @@ roms_import_paths(['./roms'])
 
 
 def make(game, state, discrete_actions=False, bk2dir=None):
-    """Function used to make the competition environment."""
+    """Make the competition environment."""
+    print('game:', game, 'state:', state)
     use_restricted_actions = retro.ACTIONS_FILTERED
     if discrete_actions:
         use_restricted_actions = retro.ACTIONS_DISCRETE
@@ -56,30 +57,26 @@ def make(game, state, discrete_actions=False, bk2dir=None):
     return env
 
 
-def make_sonic(game=None, state=None, discrete_actions=False, bk2dir=None):
+def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk2dir=None, slow=False):
     """My function to make the environment."""
-    start_state = train_states.sample().iloc[0]
-    if state is None:
-        state = start_state.state
-    if game is None:
-        game = start_state.game
-    env = make(game=game, state=state)
-    env = wrappers.RewardScaler(env)
-    env = wrappers.ScaledFloatFrame(env)
-    env = wrappers.WarpFrame(env, to_gray=False)
-    return env
+    if game is not None:
+        # restrict to this game
+        game_states = train_states[train_states.game == game]
+    else:
+        game_states = train_states
+    if state is not None:
+        # Restrict to state that contain the provided string
+        game_states = game_states[game_states.state.str.contains(state)]
 
-def make_sonic256(game=None, state=None, discrete_actions=False, bk2dir=None):
-    """My function to make the environment."""
-    start_state = train_states.sample().iloc[0]
-    if state is None:
-        state = start_state.state
-    if game is None:
-        game = start_state.game
-    env = make(game=game, state=state)
+    # choose a random matching game/state
+    start_state = game_states.sample().iloc[0]
+
+    env = make(game=start_state.game, state=start_state.state)
     env = wrappers.RewardScaler(env)
     env = wrappers.ScaledFloatFrame(env)
-    env = wrappers.WarpFrame(env, 256, 256, to_gray=False)
+    env = wrappers.WarpFrame(env, image_size, image_size, to_gray=False)
+    if slow:
+        env = wrappers.SlowFrames(env)
     return env
 
 
