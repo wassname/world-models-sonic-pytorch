@@ -49,3 +49,42 @@ class RewardScaler(gym.RewardWrapper):
 
     def reward(self, reward):
         return reward * self.scale
+
+# class TrajectoryRecorder(gym.Wrapper):
+#     """
+#     Save play trajectories.
+#
+#     Files are saved to csv's similar to the [atarigrand project ](https://github.com/yobibyte/atarigrandchallenge).
+#     """
+#     def __init__(self, env, directory):
+#         super().__init__(env)
+#         self.trajectory = []
+#
+#     def step(self, action):
+#         observation, reward, done, info = self.env.step(action)
+#         self.trajectory.append([
+#             self.env._elapsed_steps,
+#             reward,
+#             info['score'],
+#             done,
+#             action
+#         ])
+#         return observation, reward, done, info
+#
+#     def reset(self):
+#         # Save to file
+#         if len(self.trajectory) > 0:
+#             df = pd.DataFrame(self.trajectory, columns=["frame", "reward", "score", "terminal", "action"])
+#             timestamp = datetime.datetime.utcnow().strftime('%Y%m%d_%H-%M-%S')
+#             trajectory_file = os.path.join(TRAJ_DIR, 'csv', self.env.unwrapped.gamename, self.env.unwrapped.statename, '{}.csv'.format(timestamp))
+#
+#             trajectory_dir = os.path.dirname(trajectory_file)
+#             if not os.path.isdir(trajectory_dir):
+#                 os.makedirs(trajectory_dir)
+#
+#             df.to_csv(trajectory_file)
+#             logger.info("saved trajectory %s", trajectory_file)
+#
+#         # reset
+#         self.trajectory = []
+#         return self.env.reset()

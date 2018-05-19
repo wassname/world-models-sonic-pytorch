@@ -85,8 +85,8 @@ class NumpyDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.arrays[0].shape[0]
-    
-    
+
+
 
 
 def load_cache_data(basedir='/data/vae', env_name='sonic256', data_cache_file='/tmp/sonic_vae.hdf5', image_size=256, chunksize=10, action_dim=12, seq_len=1, batch_size=16):
@@ -115,32 +115,32 @@ def load_cache_data(basedir='/data/vae', env_name='sonic256', data_cache_file='/
         with TQDMDaskProgressBar():
             da.to_hdf5(data_cache_file, '/dones', d_train)
         print(data_train, y_train, r_train, d_train)
-        
+
     # load
     observations = da.from_array(h5py.File(data_cache_file, mode='r')['x'], chunks=(chunksize, image_size, image_size, 3))
     actions = da.from_array(h5py.File(data_cache_file, mode='r')['actions'], chunks=(chunksize, action_dim)).astype(np.uint8)
     rewards = da.from_array(h5py.File(data_cache_file, mode='r')['rewards'], chunks=(chunksize, ))[:, None].astype(np.float32)
     dones = da.from_array(h5py.File(data_cache_file, mode='r')['dones'], chunks=(chunksize, ))[:, None].astype(np.uint8)
     data_split = int(len(observations)*0.8)
-    
+
     # put cached data into pytorch loaders
     dataset_train = NumpyDataset(observations[:data_split], actions[:data_split], rewards[:data_split], dones[:data_split])
     loader_train = torch.utils.data.DataLoader(
-        dataset_train, 
+        dataset_train,
         sampler=SequenceInChunkSampler(dataset_train, seq_len=seq_len, chunksize=chunksize),
-        pin_memory=True, 
-        shuffle=False, 
-        batch_size=batch_size*seq_len, 
+        pin_memory=True,
+        shuffle=False,
+        batch_size=batch_size*seq_len,
         drop_last=True
     )
 
     dataset_test = NumpyDataset(observations[data_split:], actions[data_split:], rewards[data_split:], dones[data_split:])
     loader_test = torch.utils.data.DataLoader(
-        dataset_test, 
+        dataset_test,
         sampler=SequenceInChunkSampler(dataset_test, seq_len=seq_len, chunksize=chunksize),
-        pin_memory=True, 
-        shuffle=False, 
-        batch_size=batch_size*seq_len, 
+        pin_memory=True,
+        shuffle=False,
+        batch_size=batch_size*seq_len,
         drop_last=True
     )
 
