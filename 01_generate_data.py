@@ -1,6 +1,7 @@
 # xvfb-run -s "-screen 0 1400x900x24" python generate_data.py sonic
-# sudo /home/wassname/.pyenv/shims/python 01_generate_data.py sonic256 --batch_size 3 --total_episodes 500 --render --state GreenHillZone.Act1 --time_steps 1200
-# sudo /home/wassname/.pyenv/shims/python 01_generate_data.py sonic256 --batch_size 3 --total_episodes 500 --state GreenHillZone --game SonicTheHedgehog-Genesis --time_steps 1200 --human
+# sudo /home/wassname/.pyenv/shims/python 01_generate_data.py sonic256 --batch_size 1 --total_episodes 500 --state GreenHillZone --game SonicTheHedgehog-Genesis --time_steps 3600 --human
+# python 01_generate_data.py sonic256 --batch_size 4 --total_episodes 500 --game SonicTheHedgehog-Genesis --time_steps 600
+
 
 import numpy as np
 import os
