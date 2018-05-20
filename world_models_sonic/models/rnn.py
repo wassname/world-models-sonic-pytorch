@@ -29,6 +29,7 @@ class MDNRNN2(nn.Module):
         # define rnn
         self.inpt_size = z_dim + action_dim
         self.hidden_size = hidden_size
+        self.action_dim = action_dim
         self.n_mixture = n_mixture
         self.z_dim = z_dim
         self.rnn = nn.LSTM(input_size=self.inpt_size, hidden_size=hidden_size, batch_first=True)
@@ -39,7 +40,7 @@ class MDNRNN2(nn.Module):
         self.mdn = nn.Linear(hidden_size * 5, n_mixture * z_dim * 3)
         self.tau = temperature
 
-    def forward(self, inpt, action, hidden_state=None):
+    def forward(self, inpt, action_discrete, hidden_state=None):
         """
         :param inpt: a tensor of size (batch_size, seq_len, D)
         :param hidden_state: two tensors of size (1, batch_size, hidden_size)
@@ -47,6 +48,10 @@ class MDNRNN2(nn.Module):
         :return: pi, mean, sigma, hidden_state
         """
         batch_size, seq_len, _ = inpt.size()
+        # one hot code the action
+        action = torch.eye(self.action_dim)[action_discrete.long()].cuda()
+
+
         if hidden_state is None:
             # use new so that we do not need to know the tensor type explicitly.
             hidden_state = (Variable(inpt.data.new(1, batch_size, self.hidden_size)),

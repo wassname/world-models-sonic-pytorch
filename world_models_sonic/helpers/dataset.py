@@ -88,7 +88,7 @@ def load_cache_data(basedir=config.base_vae_data_dir, env_name='sonic256', data_
             da.to_hdf5(data_cache_file, {'/x': z_obs, '/actions': z_act, '/rewards': z_rew, '/dones': z_don})
 
     observations = da.from_array(h5py.File(data_cache_file, mode='r')['x'], chunks=(chunksize, image_size, image_size, 3))
-    actions = da.from_array(h5py.File(data_cache_file, mode='r')['actions'], chunks=(chunksize, action_dim)).astype(np.uint8)
+    actions = da.from_array(h5py.File(data_cache_file, mode='r')['actions'], chunks=(chunksize, ))[:, None].astype(np.uint8)
     rewards = da.from_array(h5py.File(data_cache_file, mode='r')['rewards'], chunks=(chunksize, ))[:, None].astype(np.float32)
     dones = da.from_array(h5py.File(data_cache_file, mode='r')['dones'], chunks=(chunksize, ))[:, None].astype(np.uint8)
     print("Loaded from cache", data_cache_file)
