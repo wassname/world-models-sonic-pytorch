@@ -66,7 +66,7 @@ TODOs
     - [openai/retro](https://github.com/openai/retro)
     - [openai/gym_remote (from retro-contest)](https://github.com/openai/retro-contest)
     - [openai/retro-baselines](https://github.com/openai/retro-baselines/blob/master/agents/ppo2.docker)
-    
+
 
 - roms: you need the ROM files for the Sonic games
     - install from steam
@@ -78,7 +78,7 @@ TODOs
         - [Sonic The Hedgehog (Japan, Korea).md](http://www.completeroms.com/dl/sega-genesis/sonic-the-hedgehog-japan-korea/151020)
         - [Sonic The Hedgehog 2 (World) (Rev A).md](http://www.completeroms.com/dl/game-gear/sonic-the-hedgehog-2-u-/7772)
         - [Sonic & Knuckles + Sonic The Hedgehog 3 (USA).md](http://www.completeroms.com/dl/sega-genesis/sonic-and-knuckles-sonic-3-jue-/1824)
-        
+
 ### Running
 
 I have included the pretrained models in releases
@@ -86,3 +86,13 @@ I have included the pretrained models in releases
 - 01_gather_dynamics training_data.py
 - 02_train_dynamics model.ipynb
 - 03_train_controller.ipynb
+
+## Hyperparameters
+
+`02_train_dynamics model.ipynb` uses joint training for the VAE, forward, and inverse models (https://arxiv.org/abs/1803.10122). This introduces a few new hyperperameters, but at of 20180520 there is no information on how to set these. The parameters are lambda_vae and lambda_finv.
+
+We want changes to be within an order of magnitude, and we preffer loss VAE to be optimised preferentially, then mdnrnn, then finv. So we want to set it so that loss_vae is large.
+
+For example, if the mdnn is optimised over the VAE, the VAE will learn to output blank images, which the mdnrnn will predict with perfect accuracy. Likewise if the finv is optimised preferentially, the model will only learn to encode the actions in blank images. There are unsatisying local minima.
+
+To set them, you should run for a few epochs with them set to 1, then record the three components of the loss. For example you might get loss_vae=20,000, loss_mdnrnn=3, loss_finv=3. In this case I would set lambda_vae=1/1,00, and the other to one. Keep and eye on the balance between them and make sure they don't get too unbalanced, eventually my unbalanced losses were around loss_vae=2000, loss_mdnrnn=-2, loss_finv=0.1. This means the loss reduction of each was 1800, 5, and 2.5, and the balances loss reductions were 18, 5, and 2.9. All values within an order of mangitude and in an order which follows our preferences.
