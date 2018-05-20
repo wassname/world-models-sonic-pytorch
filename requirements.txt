@@ -9,3 +9,4 @@ h5py==2.7.0
 zarr==2.2.0
 dask[array]=0.17.2
 keyboard==0.13.2
+-e git+https://github.com/ShangtongZhang/DeepRL.git@7066fb8e89e9b7e2f029349cdf3fc1d225c0f933#egg=deep_rl
