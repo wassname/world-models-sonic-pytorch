@@ -5,6 +5,7 @@ import torch.nn as nn
 import math
 import numpy as np
 
+from .config import eps
 
 class ConvBlock4(torch.nn.Module):
     def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
@@ -119,7 +120,7 @@ class VAE5(nn.Module):
         """Returns mean and log variance, which describe the distributions of Z"""
         x = self.encoder(x)
         x = x.view(x.size()[0], -1)
-        return self.mu(x), self.logvar(x).clamp(np.log(1e-7),-np.log(1e-7))
+        return self.mu(x), self.logvar(x).clamp(np.log(eps),-np.log(eps))
 
     def decode(self, z):
         """Reconstruct image X using z sampled from Z."""

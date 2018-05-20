@@ -7,7 +7,7 @@ from torch.autograd import Variable
 import math
 import numpy as np
 
-eps = 1e-8
+from .config import eps
 logeps = math.log(eps)
 
 class MDNRNN(nn.Module):
@@ -60,22 +60,22 @@ class MDNRNN(nn.Module):
         # N, seq_len, n_mixture * z_dim * 2 + n_mixture
         output = output.contiguous()
         output = output.view(-1, self.hidden_size)
-        
+
         mixture = self.mdn(output)
         mixture = mixture.view(batch_size, seq_len, -1)
-        
+
         ## Split output into mean, logsigma, pi
-        
+
         # N * seq_len
         mu = mixture[..., :self.n_mixture * self.z_dim]
         logsigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim*2]
         pi = mixture[..., self.n_mixture * self.z_dim*2:self.n_mixture * self.z_dim*3]
-        
+
         # Reshape
         mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
         logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps),-np.log(eps))
         pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim))
-        
+
         # Transform
         sigma = torch.exp(logsigma)
         pi = F.softmax(pi, 2)  # Weights over n_mixtures should sum to one
@@ -86,19 +86,19 @@ class MDNRNN(nn.Module):
             sigma *= self.tau ** 0.5
 
         return pi, mu, sigma
-    
+
     def normal_prob(self, y_true, mu, sigma, pi):
         """Probability of a value given the distribution."""
         rollout_length = y_true.size(1)
-        
+
         # Repeat, for number of repeated mixtures
         y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
-        
+
         # Use pytorches normal dist class to calc the probs
         z_normals = torch.distributions.Normal(mu, sigma)
         z_prob = z_normals.log_prob(y_true).exp() #.clamp(logeps, -logeps).exp()
         return (z_prob * pi).sum(2) # weight, then sum over the mixtures
-    
+
     def sample(self, pi, mu, sigma):
         """Sample z from Z."""
         z_normals = torch.distributions.Normal(mu, sigma)
@@ -113,7 +113,7 @@ class MDNRNN(nn.Module):
         # and https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
         # and https://github.com/JunhongXu/world-models-pytorch
 
-        # probability shape [batch, seq, num_mixtures, z_dim]  
+        # probability shape [batch, seq, num_mixtures, z_dim]
         prob = self.normal_prob(y_true, mu, sigma, pi)
         loss = -torch.log(prob + eps)
 
@@ -125,7 +125,7 @@ class MDNRNN(nn.Module):
     def rnn_loss(self, y_true, pi, mu, sigma):
         r_loss = self.rnn_r_loss(y_true, pi, mu, sigma)
         return r_loss
-    
+
 class MDNRNN2(nn.Module):
     def __init__(self, z_dim, action_dim, hidden_size, n_mixture, temperature):
         """
@@ -178,24 +178,24 @@ class MDNRNN2(nn.Module):
         # N, seq_len, n_mixture * z_dim * 2 + n_mixture
         output = output.contiguous()
         output = output.view(-1, self.hidden_size)
-        
+
         output = F.leaky_relu(self.ln1(output))
         output = F.leaky_relu(self.ln2(output))
         mixture = self.mdn(output)
         mixture = mixture.view(batch_size, seq_len, -1)
-        
+
         ## Split output into mean, logsigma, pi
-        
+
         # N * seq_len
         mu = mixture[..., :self.n_mixture * self.z_dim]
         logsigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim*2]
         pi = mixture[..., self.n_mixture * self.z_dim*2:self.n_mixture * self.z_dim*3]
-        
+
         # Reshape
         mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
         logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps),-np.log(eps))
         pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim))
-        
+
         # Transform
         sigma = torch.exp(logsigma)
         pi = F.softmax(pi, 2)  # Weights over n_mixtures should sum to one
@@ -206,19 +206,19 @@ class MDNRNN2(nn.Module):
             sigma *= self.tau ** 0.5
 
         return pi, mu, sigma
-    
+
     def normal_prob(self, y_true, mu, sigma, pi):
         """Probability of a value given the distribution."""
         rollout_length = y_true.size(1)
-        
+
         # Repeat, for number of repeated mixtures
         y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
-        
+
         # Use pytorches normal dist class to calc the probs
         z_normals = torch.distributions.Normal(mu, sigma)
         z_prob = z_normals.log_prob(y_true).exp() #.clamp(logeps, -logeps).exp()
         return (z_prob * pi).sum(2) # weight, then sum over the mixtures
-    
+
     def sample(self, pi, mu, sigma):
         """Sample z from Z."""
         z_normals = torch.distributions.Normal(mu, sigma)
@@ -233,13 +233,17 @@ class MDNRNN2(nn.Module):
         # and https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
         # and https://github.com/JunhongXu/world-models-pytorch
 
-        # probability shape [batch, seq, num_mixtures, z_dim]  
+        # probability shape [batch, seq, num_mixtures, z_dim]
         prob = self.normal_prob(y_true, mu, sigma, pi)
         loss = -torch.log(prob + eps)
 
         # mean over seq and z dim and num_mixtures
         batch_size = y_true.size(0)
         loss = loss.view((batch_size, -1)).mean(1)
+
+        # We want the loss to +ve and approach zero. But, since we clip to eps(ilon)
+        # it's approaching `log(eps)`` E.g. `log(1e-7)=-16.12`. So let's shift it to approach zero from above.
+        loss -= np.log(eps)
         return loss
 
     def rnn_loss(self, y_true, pi, mu, sigma):
