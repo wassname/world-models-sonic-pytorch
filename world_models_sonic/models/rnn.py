@@ -4,11 +4,13 @@ from torch.nn import functional as F
 from torch import normal, multinomial
 import torch.distributions
 from torch.autograd import Variable
+from torch import normal, multinomial
 import math
 import numpy as np
 
 from ..config import eps
 logeps = math.log(eps)
+
 
 class MDNRNN2(nn.Module):
     def __init__(self, z_dim, action_dim, hidden_size, n_mixture, temperature):
@@ -33,8 +35,8 @@ class MDNRNN2(nn.Module):
 
         # define MDN as fully connected layer
         self.ln1 = nn.Linear(hidden_size, hidden_size)
-        self.ln2 = nn.Linear(hidden_size, hidden_size*5)
-        self.mdn = nn.Linear(hidden_size*5, n_mixture * z_dim * 3)
+        self.ln2 = nn.Linear(hidden_size, hidden_size * 5)
+        self.mdn = nn.Linear(hidden_size * 5, n_mixture * z_dim * 3)
         self.tau = temperature
 
     def forward(self, inpt, action, hidden_state=None):
@@ -68,16 +70,16 @@ class MDNRNN2(nn.Module):
         mixture = self.mdn(output)
         mixture = mixture.view(batch_size, seq_len, -1)
 
-        ## Split output into mean, logsigma, pi
+        # Split output into mean, logsigma, pi
 
         # N * seq_len
         mu = mixture[..., :self.n_mixture * self.z_dim]
-        logsigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim*2]
-        pi = mixture[..., self.n_mixture * self.z_dim*2:self.n_mixture * self.z_dim*3]
+        logsigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim * 2]
+        pi = mixture[..., self.n_mixture * self.z_dim * 2:self.n_mixture * self.z_dim * 3]
 
         # Reshape
         mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
-        logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps),-np.log(eps))
+        logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps), -np.log(eps))
         pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim))
 
         # Transform
@@ -100,17 +102,41 @@ class MDNRNN2(nn.Module):
 
         # Use pytorches normal dist class to calc the probs
         z_normals = torch.distributions.Normal(mu, sigma)
-        z_prob = z_normals.log_prob(y_true).exp() #.clamp(logeps, -logeps).exp()
-        return (z_prob * pi).sum(2) # weight, then sum over the mixtures
+        z_prob = z_normals.log_prob(y_true).exp()  # .clamp(logeps, -logeps).exp()
+        return (z_prob * pi).sum(2)  # weight, then sum over the mixtures
+
+    def multinomial_on_axis(self, pi, axis=2):
+        """
+        Take the multinomial along one dimenionself.
+
+        Returns an array with the same shape as the input but the chosen axis
+        has one element set to one, and the other to zero. So you can multiply
+        another array then sum, to choose an axis.
+
+        e.g. k * mu = [0, 0, 1, 0] * [1.4, 1.5, 0.2, 3] = [0, 0, 0.2, 0]
+        """
+        # Reshape pi, so we can get the multinomial along the mixture dimension
+        batch, seq, mixtures, z_dim = pi.size()
+        pi = pi.transpose(axis, 3).contiguous().view(-1, 3)
+        # sample
+        k = torch.distributions.Multinomial(1, pi).sample()
+        # reshape back
+        k = k.view(batch, seq, z_dim, 3).transpose(axis, 3).contiguous()
+        # assert (k.sum(axis)==1).all(), 'should sum to one'
+        # assert (k.max(axis)[0]==1).all(), 'max should be one'
+        return k
 
     def sample(self, pi, mu, sigma):
         """Sample z from Z."""
+        k = self.multinomial_on_axis(pi, axis=2)
+        mu = (mu * k).sum(2)
+        sigma = (sigma * k).sum(2)
         z_normals = torch.distributions.Normal(mu, sigma)
         if self.training:
             z_sample = z_normals.rsample()
         else:
             z_sample = z_normals.sample()
-        return (z_sample * pi).sum(2) # sum over mixtures
+        return z_sample
 
     def rnn_r_loss(self, y_true, pi, mu, sigma):
         # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
