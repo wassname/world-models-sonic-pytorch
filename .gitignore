@@ -1,4 +1,7 @@
 data/vae/
+data/sonic/
+outsputs/
+keyboard/
 models/
 oldnotebokos/
 nohup.out
