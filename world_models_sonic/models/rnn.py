@@ -7,7 +7,7 @@ from torch.autograd import Variable
 import math
 import numpy as np
 
-from .config import eps
+from ..config import eps
 logeps = math.log(eps)
 
 class MDNRNN(nn.Module):

@@ -5,7 +5,7 @@ import torch.nn as nn
 import math
 import numpy as np
 
-from .config import eps
+from ..config import eps
 
 class ConvBlock4(torch.nn.Module):
     def __init__(self, inpt_kernel, output_kernel, kernel_size=4, stride=1, padding=0):
