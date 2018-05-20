@@ -6,6 +6,10 @@ import time
 cv2.ocl.setUseOpenCL(False)
 
 
+sonic_buttons = ["B", "A", "MODE", "START", "UP", "DOWN", "LEFT", "RIGHT", "C", "Y", "X", "Z"]
+discrete_actions = [[], ['LEFT'], ['RIGHT'], ['LEFT', 'DOWN'], ['RIGHT', 'DOWN'], ['DOWN'],
+               ['DOWN', 'B'], ['LEFT', 'B'], ['RIGHT', 'B'], ['B']]
+
 class ScaledFloatFrame(gym.ObservationWrapper):
     def __init__(self, env):
         gym.ObservationWrapper.__init__(self, env)
@@ -52,20 +56,6 @@ class WarpFrame(gym.ObservationWrapper):
         return frame
 
 
-class RewardScaler(gym.RewardWrapper):
-    """
-    Bring rewards to a reasonable scale for PPO.
-    This is incredibly important and effects performance
-    drastically.
-    """
-
-    def __init__(self, env, scale=0.01):
-        gym.RewardWrapper.__init__(self, env)
-        self.scale = scale
-
-    def reward(self, reward):
-        return reward * self.scale
-
 # class TrajectoryRecorder(gym.Wrapper):
 #     """
 #     Save play trajectories.
@@ -104,3 +94,62 @@ class RewardScaler(gym.RewardWrapper):
 #         # reset
 #         self.trajectory = []
 #         return self.env.reset()
+
+
+# wrappers below are from from https://github.com/openai/retro-baselines/blob/master/agents/sonic_util.py
+class SonicDiscretizer(gym.ActionWrapper):
+    """
+    Wrap a gym-retro environment and make it use discrete
+    actions for the Sonic game.
+    """
+    def __init__(self, env):
+        super(SonicDiscretizer, self).__init__(env)
+        self._actions = []
+        for action in discrete_actions:
+            arr = np.array([False] * 12)
+            for button in action:
+                arr[sonic_buttons.index(button)] = True
+            self._actions.append(arr)
+        self.action_space = gym.spaces.Discrete(len(self._actions))
+
+    def action(self, a): # pylint: disable=W0221
+        return self._actions[a].copy()
+
+
+class RewardScaler(gym.RewardWrapper):
+    """
+    Bring rewards to a reasonable scale for PPO.
+    This is incredibly important and effects performance
+    drastically.
+    """
+
+    def __init__(self, env, scale=0.01):
+        gym.RewardWrapper.__init__(self, env)
+        self.scale = scale
+
+    def reward(self, reward):
+        return reward * self.scale
+
+class AllowBacktracking(gym.Wrapper):
+    """
+    Use deltas in max(X) as the reward, rather than deltas
+    in X. This way, agents are not discouraged too heavily
+    from exploring backwards if there is no way to advance
+    head-on in the level.
+    """
+    def __init__(self, env):
+        super(AllowBacktracking, self).__init__(env)
+        self._cur_x = 0
+        self._max_x = 0
+
+    def reset(self, **kwargs): # pylint: disable=E0202
+        self._cur_x = 0
+        self._max_x = 0
+        return self.env.reset(**kwargs)
+
+    def step(self, action): # pylint: disable=E0202
+        obs, rew, done, info = self.env.step(action)
+        self._cur_x += rew
+        rew = max(0, self._cur_x - self._max_x)
+        self._max_x = max(self._max_x, self._cur_x)
+        return obs, rew, done, info

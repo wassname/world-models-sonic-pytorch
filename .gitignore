@@ -3,8 +3,10 @@ data/sonic/
 outsputs/
 keyboard/
 models/
+logs/
 oldnotebokos/
 nohup.out
+data/*.bin
 
 # Created by .ignore support plugin (hsz.mobi)
 .gitignore

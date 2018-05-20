@@ -25,7 +25,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__file__)
 logger.setLevel(logging.INFO)
 
-
 def roms_import_paths(paths):
     """Import sega roms from a list of paths"""
     potential_roms = []
@@ -73,6 +72,8 @@ def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk
 
     env = make(game=start_state.game, state=start_state.state)
     env = wrappers.RewardScaler(env)
+    env = wrappers.SonicDiscretizer(env)
+    env = wrappers.AllowBacktracking(env)
     env = wrappers.ScaledFloatFrame(env)
     env = wrappers.WarpFrame(env, image_size, image_size, to_gray=False)
     if slow:

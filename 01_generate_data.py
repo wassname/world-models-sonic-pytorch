@@ -1,7 +1,7 @@
 # xvfb-run -s "-screen 0 1400x900x24" python generate_data.py sonic
 # sudo /home/wassname/.pyenv/shims/python 01_generate_data.py sonic256 --batch_size 1 --total_episodes 500 --state GreenHillZone --game SonicTheHedgehog-Genesis --time_steps 3600 --human
-# python 01_generate_data.py sonic256 --batch_size 4 --total_episodes 500 --game SonicTheHedgehog-Genesis --time_steps 600
-
+# python 01_generate_data.py sonic256 --batch_size 2 --total_episodes 500 --game SonicTheHedgehog-Genesis --time_steps 600
+# python 01_generate_data.py sonic256 --batch_size 1 --total_episodes 500 --state GreenHillZone --game SonicTheHedgehog-Genesis --time_steps 1200
 
 import numpy as np
 import os
@@ -12,20 +12,16 @@ import zarr
 
 from world_models_sonic.custom_envs.env import make_env
 from world_models_sonic import config
-from world_models_sonic.record_human_plays import keyboard_to_actions
+from world_models_sonic.record_human_plays import keyboard_to_actions, keyboard_to__discrete_actions
 import keyboard
 
 
 def generate_data_action(t, current_action):
     """Default action used to 01 generate data."""
-    if t % 4 == 0:
-        return [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]  # right
-    elif t % 5 == 0:
-        return [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0]  # down right
-    elif t % 6 == 0:
-        return [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]  # jump and right
-    elif t % 7 == 0:
-        return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]  # down jump
+    if t % 3 == 0:
+        return 2 # right
+    elif t % 10 == 0:
+        return 8 # up, right
     return current_action
 
 
@@ -86,7 +82,7 @@ def main(args):
                     t = t + 1
 
                     if args.human:
-                        action = keyboard_to_actions()
+                        action = keyboard_to__discrete_actions()
                     else:
                         action = env.action_space.sample()
                         action = generate_data_action(t, action)
