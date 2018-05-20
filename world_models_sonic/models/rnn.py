@@ -118,13 +118,13 @@ class MDNRNN2(nn.Module):
         # and https://github.com/JunhongXu/world-models-pytorch
 
         # probability shape [batch, seq, num_mixtures, z_dim]
-        batch_size, seq_len, _, _ = y_true.size()
+        batch_size, seq_len, _ = y_true.size()
         prob = self.normal_prob(y_true, mu, sigma, pi)
         loss = -torch.log(prob + eps)
 
         # mean over seq and z dim and num_mixtures
         batch_size = y_true.size(0)
-        loss = loss.view((batch_size, seq_len, -1)).mean(1)
+        loss = loss.view((batch_size, seq_len, -1)).mean(2)
 
         # We want the loss to +ve and approach zero. But, since we clip to eps(ilon)
         # it's approaching `log(eps)`` E.g. `log(1e-7)=-16.12`. So let's shift it to approach zero from above.
