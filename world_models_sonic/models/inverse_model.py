@@ -20,5 +20,5 @@ class InverseModel(torch.nn.modules.Module):
         x = F.relu(self.ln1(x))
         x = F.relu(self.ln2(x))
         x = self.ln3(x)
-        x = F.softmax(x, -1).max(-1)[1]
+        x = F.softmax(x, -1)
         return x

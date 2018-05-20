@@ -1,10 +1,16 @@
 # world-models-pytorch
 
 My attempt to implement an unsupervised dynamics model with ideas from three papers
-- ["World Models"](https://arxiv.org/abs/1803.10760)
-- ["MERLIN "or "Unsupervised Predictive Memory in a Goal-Directed Agent"](https://arxiv.org/abs/1804.10689)
-- ["Decoupling Dynamics and Reward for Transfer Learning"](https://arxiv.org/abs/1803.10122)
+- ["World Models"](https://arxiv.org/abs/1803.10122)
+- ["MERLIN "or "Unsupervised Predictive Memory in a Goal-Directed Agent"](https://arxiv.org/abs/1803.10760 )
+- ["Decoupling Dynamics and Reward for Transfer Learning"](https://arxiv.org/abs/1804.10689)
 
+- ["
+Learning and Querying Fast Generative Models for Reinforcement Learning"](https://arxiv.org/abs/1802.03006)
+- ["
+Probing Physics Knowledge Using Tools from Developmental Psychology"](https://arxiv.org/abs/1804.01128)
+- ["
+Machine Theory of Mind"](https://arxiv.org/abs/1802.07740)
 
 ## The work is in progress
 
