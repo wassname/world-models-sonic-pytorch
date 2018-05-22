@@ -15,11 +15,10 @@ import retro.data
 from retro_contest.local import make
 import retro_contest
 from . import wrappers
+from .data import train_states, validation_states
 
 # INIT
 ROM_DIRS = ['./roms', retro.data_path()]
-train_states = pd.read_csv('./data/sonic_env/sonic-train.csv')
-validation_states = pd.read_csv('./data/sonic_env/sonic-validation.csv')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__file__)

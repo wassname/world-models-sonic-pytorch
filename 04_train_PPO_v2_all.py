@@ -128,7 +128,7 @@ class SonicWorldModelDeepRL(BaseTask):
         BaseTask.__init__(self)
         self.name = name
         self.world_model = world_model_func()
-        self.env = WorldModelWrapper(make_env(self.name, state=state, game=game), self.world_model, cuda=cuda)
+        self.env = WorldModelWrapper(make_env(self.name, state=state, game=game), self.world_model, cuda=cuda, state=state)
         self.env._max_episode_steps = max_steps
         self.action_dim = self.env.action_space.n
         self.state_dim = self.env.observation_space.shape[0]
