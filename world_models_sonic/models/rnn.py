@@ -122,11 +122,12 @@ class MDNRNN2(nn.Module):
         """
         # Reshape pi, so we can get the multinomial along the mixture dimension
         batch, seq, mixtures, z_dim = pi.size()
-        pi = pi.transpose(axis, 3).contiguous().view(-1, 3)
+        pi = pi.transpose(axis, 3).contiguous()
+        pi_flat = pi.view(-1, pi.size(axis))
         # sample
-        k = torch.distributions.Multinomial(1, pi).sample()
+        k = torch.distributions.Multinomial(1, pi_flat).sample()
         # reshape back
-        k = k.view(batch, seq, z_dim, 3).transpose(axis, 3).contiguous()
+        k = k.view(*pi.size()).transpose(axis, 3).contiguous()
         # assert (k.sum(axis)==1).all(), 'should sum to one'
         # assert (k.max(axis)[0]==1).all(), 'max should be one'
         return k
