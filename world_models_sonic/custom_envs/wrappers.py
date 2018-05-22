@@ -81,7 +81,7 @@ class WorldModelWrapper(gym.Wrapper):
         """Use the world model to give next latent state as observation."""
         super().__init__(env)
         self.world_model = world_model
-        self.max_hidden_states = 2
+        self.max_hidden_states = 4
         self.img_z = None
         self.img_z_next_pred = None
         self.hidden_state = None
@@ -93,8 +93,11 @@ class WorldModelWrapper(gym.Wrapper):
     def process_obs(self, observation, action=None):
         if action is None:
             action = self.env.action_space.sample()
-        action = torch.from_numpy(np.array(action)).cuda().unsqueeze(0).unsqueeze(0)
-        observation = torch.from_numpy(observation).cuda().unsqueeze(0).transpose(1, 3)
+        action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0)
+        observation = torch.from_numpy(observation).unsqueeze(0).transpose(1, 3)
+        if self.cuda:
+            action=action.cuda()
+            observation=observation.cuda()
 
         z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
         z = z.squeeze(0).cpu().data.numpy()
@@ -103,7 +106,7 @@ class WorldModelWrapper(gym.Wrapper):
 
         self.z = z
         self.z_next = z_next
-        hidden_state = [h.data for h in hidden_state]
+        hidden_state = [h.data for h in hidden_state] # Otherwise it doesn't garbge collect
         if self.max_hidden_states == 1:
             self.hidden_state = hidden_state[-1][None, :]
         else:
