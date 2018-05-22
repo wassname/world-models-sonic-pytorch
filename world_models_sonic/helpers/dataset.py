@@ -59,7 +59,7 @@ class NumpyDataset(torch.utils.data.Dataset):
         return self.arrays[0].shape[0]
 
 
-def load_cache_data(basedir=config.base_vae_data_dir, env_name='sonic256', data_cache_file=None, chunksize=None, action_dim=12, seq_len=1, batch_size=16, image_size=256):
+def load_cache_data(basedir=config.base_vae_data_dir, env_name='sonic256', data_cache_file=None, chunksize=None, action_dim=12, seq_len=1, batch_size=16, image_size=256, pin_memory=True):
     if data_cache_file is None:
         data_cache_file = os.path.join(config.base_vae_data_dir, 'sonic_rollout_cache.hdf5')
 
@@ -99,7 +99,7 @@ def load_cache_data(basedir=config.base_vae_data_dir, env_name='sonic256', data_
     loader_train = torch.utils.data.DataLoader(
         dataset_train,
         sampler=SequenceInChunkSampler(dataset_train, seq_len=seq_len, chunksize=chunksize),
-        pin_memory=True,
+        pin_memory=pin_memory,
         shuffle=False,
         batch_size=batch_size * seq_len,
         drop_last=True
@@ -109,7 +109,7 @@ def load_cache_data(basedir=config.base_vae_data_dir, env_name='sonic256', data_
     loader_test = torch.utils.data.DataLoader(
         dataset_test,
         sampler=SequenceInChunkSampler(dataset_test, seq_len=seq_len, chunksize=chunksize),
-        pin_memory=True,
+        pin_memory=pin_memory,
         shuffle=False,
         batch_size=batch_size * seq_len,
         drop_last=True

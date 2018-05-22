@@ -1,12 +1,12 @@
-data/vae/
-data/sonic/
-outsputs/
-keyboard/
-models/
-logs/
-oldnotebokos/
-nohup.out
-data/*.bin
+/data/vae/
+/data/sonic/
+/outputs/
+/keyboard/
+/models/
+/log/
+/oldnotebooks/
+/nohup.out
+/data/*.bin
 
 # Created by .ignore support plugin (hsz.mobi)
 .gitignore
