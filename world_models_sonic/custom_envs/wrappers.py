@@ -93,21 +93,22 @@ class WorldModelWrapper(gym.Wrapper):
     def process_obs(self, observation, action=None):
         if action is None:
             action = self.env.action_space.sample()
-        action = torch.from_numpy(np.array(action)).cuda().unsqueeze(0).unsqueeze(0)
-        observation = torch.from_numpy(observation).cuda().unsqueeze(0).transpose(1, 3)
+        with torch.no_grad():
+            action = torch.from_numpy(np.array(action)).cuda().unsqueeze(0).unsqueeze(0)
+            observation = torch.from_numpy(observation).cuda().unsqueeze(0).transpose(1, 3)
 
-        z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
-        z = z.squeeze(0).cpu().data.numpy()
-        z_next = z_next.squeeze(0).cpu().data.numpy()
-        latest_hidden = hidden_state[-1].squeeze(0).squeeze(0).cpu().data.numpy()
+            z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
+            z = z.squeeze(0).cpu().data.numpy()
+            z_next = z_next.squeeze(0).cpu().data.numpy()
+            latest_hidden = hidden_state[-1].squeeze(0).squeeze(0).cpu().data.numpy()
 
-        self.z = z
-        self.z_next = z_next
-        hidden_state = [h.data for h in hidden_state]
-        if self.max_hidden_states == 1:
-            self.hidden_state = hidden_state[-1][None, :]
-        else:
-            self.hidden_state = hidden_state[-self.max_hidden_states:]
+            self.z = z
+            self.z_next = z_next
+            hidden_state = [h.data for h in hidden_state]
+            if self.max_hidden_states == 1:
+                self.hidden_state = hidden_state[-1][None, :]
+            else:
+                self.hidden_state = hidden_state[-self.max_hidden_states:]
 
         return np.concatenate([z, latest_hidden])
 
@@ -165,23 +166,24 @@ class WorldModelWrapper(gym.Wrapper):
             # Decode latent vector for display
 
             # to pytorch
-            zv = torch.from_numpy(self.z)[None, :]
-            zv_next = torch.from_numpy(self.z_next)[None, :]
-            if self.cuda:
-                zv = zv.cuda()
-                zv_next = zv_next.cuda()
+            with torch.no_grad():
+                zv = torch.from_numpy(self.z)[None, :]
+                zv_next = torch.from_numpy(self.z_next)[None, :]
+                if self.cuda:
+                    zv = zv.cuda()
+                    zv_next = zv_next.cuda()
 
-            # Decode
-            img_z = self.world_model.vae.decode(zv)
-            img_z_next = self.world_model.vae.decode(zv_next)
+                # Decode
+                img_z = self.world_model.vae.decode(zv)
+                img_z_next = self.world_model.vae.decode(zv_next)
 
-            # to numpy images
-            img_z = img_z.squeeze(0).transpose(0, 2)
-            img_z = img_z.data.cpu().numpy()
-            img_z = (img_z * 255).astype(np.uint8)
-            img_z_next = img_z_next.squeeze(0).transpose(0, 2)
-            img_z_next = img_z_next.data.cpu().numpy()
-            img_z_next = (img_z_next * 255).astype(np.uint8)
+                # to numpy images
+                img_z = img_z.squeeze(0).transpose(0, 2)
+                img_z = img_z.data.cpu().numpy()
+                img_z = (img_z * 255).astype(np.uint8)
+                img_z_next = img_z_next.squeeze(0).transpose(0, 2)
+                img_z_next = img_z_next.data.cpu().numpy()
+                img_z_next = (img_z_next * 255).astype(np.uint8)
 
             z_uint8 = ((self.z + 0.5) * 255).astype(np.uint8).reshape((16, 16))
             z_uint8 = skimage.color.gray2rgb(z_uint8)  # Make it rgb to avoid problems with pyglet
