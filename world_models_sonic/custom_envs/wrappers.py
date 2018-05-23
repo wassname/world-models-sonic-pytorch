@@ -1,16 +1,17 @@
+import os
 import numpy as np
 import gym
 from gym import spaces
+import gzip
 import cv2
 import time
 import skimage.color
 import torch
+import retro
 
 cv2.ocl.setUseOpenCL(False)
 
-sonic_buttons = ["B", "A", "MODE", "START", "UP", "DOWN", "LEFT", "RIGHT", "C", "Y", "X", "Z"]
-discrete_actions = [[], ['LEFT'], ['RIGHT'], ['LEFT', 'DOWN'], ['RIGHT', 'DOWN'], ['DOWN'],
-                    ['DOWN', 'B'], ['LEFT', 'B'], ['RIGHT', 'B'], ['B']]
+from .data import sonic_buttons, discrete_actions, train_states, validation_states
 
 
 class RenderWrapper(gym.Wrapper):
@@ -77,11 +78,12 @@ class WarpFrame(gym.ObservationWrapper):
 
 
 class WorldModelWrapper(gym.Wrapper):
-    def __init__(self, env, world_model, cuda=True):
+    def __init__(self, env, world_model, cuda=True, state=None):
         """Use the world model to give next latent state as observation."""
         super().__init__(env)
         self.world_model = world_model
-        self.max_hidden_states = 2
+        self.max_hidden_states = 4
+        self.state = state
         self.img_z = None
         self.img_z_next_pred = None
         self.hidden_state = None
@@ -119,6 +121,22 @@ class WorldModelWrapper(gym.Wrapper):
         return observation, reward, done, info
 
     def reset(self):
+        # Reset to a random level (but don't change the game)
+        game = self.env.unwrapped.gamename
+        game_path = retro.get_game_path(game)
+
+        # pick a random state that's in the same game
+        game_states = train_states[train_states.game == game]
+        if self.state:
+            game_states = game_states[game_states.state.str.contains(state)]
+
+        # Load
+        print('reseting to', state)
+        state = game_states.sample().iloc[0].state + '.state'
+        with gzip.open(os.path.join(game_path, state), 'rb') as fh:
+            self.env.unwrapped.initial_state = fh.read()
+
+        # Reset
         self.hidden_state = None
         observation = self.env.reset()
         observation = self.process_obs(observation)
