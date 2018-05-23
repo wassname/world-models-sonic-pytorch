@@ -95,22 +95,24 @@ class WorldModelWrapper(gym.Wrapper):
     def process_obs(self, observation, action=None):
         if action is None:
             action = self.env.action_space.sample()
-        with torch.no_grad():
-            action = torch.from_numpy(np.array(action)).cuda().unsqueeze(0).unsqueeze(0)
-            observation = torch.from_numpy(observation).cuda().unsqueeze(0).transpose(1, 3)
+        action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0)
+        observation = torch.from_numpy(observation).unsqueeze(0).transpose(1, 3)
+        if self.cuda:
+            action=action.cuda()
+            observation=observation.cuda()
 
-            z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
-            z = z.squeeze(0).cpu().data.numpy()
-            z_next = z_next.squeeze(0).cpu().data.numpy()
-            latest_hidden = hidden_state[-1].squeeze(0).squeeze(0).cpu().data.numpy()
+        z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
+        z = z.squeeze(0).cpu().data.numpy()
+        z_next = z_next.squeeze(0).cpu().data.numpy()
+        latest_hidden = hidden_state[-1].squeeze(0).squeeze(0).cpu().data.numpy()
 
-            self.z = z
-            self.z_next = z_next
-            hidden_state = [h.data for h in hidden_state]
-            if self.max_hidden_states == 1:
-                self.hidden_state = hidden_state[-1][None, :]
-            else:
-                self.hidden_state = hidden_state[-self.max_hidden_states:]
+        self.z = z
+        self.z_next = z_next
+        hidden_state = [h.data for h in hidden_state] # Otherwise it doesn't garbge collect
+        if self.max_hidden_states == 1:
+            self.hidden_state = hidden_state[-1][None, :]
+        else:
+            self.hidden_state = hidden_state[-self.max_hidden_states:]
 
         return np.concatenate([z, latest_hidden])
 
@@ -124,18 +126,18 @@ class WorldModelWrapper(gym.Wrapper):
         # Reset to a random level (but don't change the game)
         game = self.env.unwrapped.gamename
         game_path = retro.get_game_path(game)
-
+        
         # pick a random state that's in the same game
         game_states = train_states[train_states.game == game]
         if self.state:
             game_states = game_states[game_states.state.str.contains(state)]
-
+           
         # Load
-        print('reseting to', state)
         state = game_states.sample().iloc[0].state + '.state'
+        print('reseting to', state)
         with gzip.open(os.path.join(game_path, state), 'rb') as fh:
             self.env.unwrapped.initial_state = fh.read()
-
+         
         # Reset
         self.hidden_state = None
         observation = self.env.reset()
@@ -184,24 +186,23 @@ class WorldModelWrapper(gym.Wrapper):
             # Decode latent vector for display
 
             # to pytorch
-            with torch.no_grad():
-                zv = torch.from_numpy(self.z)[None, :]
-                zv_next = torch.from_numpy(self.z_next)[None, :]
-                if self.cuda:
-                    zv = zv.cuda()
-                    zv_next = zv_next.cuda()
+            zv = torch.from_numpy(self.z)[None, :]
+            zv_next = torch.from_numpy(self.z_next)[None, :]
+            if self.cuda:
+                zv = zv.cuda()
+                zv_next = zv_next.cuda()
 
-                # Decode
-                img_z = self.world_model.vae.decode(zv)
-                img_z_next = self.world_model.vae.decode(zv_next)
+            # Decode
+            img_z = self.world_model.vae.decode(zv)
+            img_z_next = self.world_model.vae.decode(zv_next)
 
-                # to numpy images
-                img_z = img_z.squeeze(0).transpose(0, 2)
-                img_z = img_z.data.cpu().numpy()
-                img_z = (img_z * 255).astype(np.uint8)
-                img_z_next = img_z_next.squeeze(0).transpose(0, 2)
-                img_z_next = img_z_next.data.cpu().numpy()
-                img_z_next = (img_z_next * 255).astype(np.uint8)
+            # to numpy images
+            img_z = img_z.squeeze(0).transpose(0, 2)
+            img_z = img_z.data.cpu().numpy()
+            img_z = (img_z * 255).astype(np.uint8)
+            img_z_next = img_z_next.squeeze(0).transpose(0, 2)
+            img_z_next = img_z_next.data.cpu().numpy()
+            img_z_next = (img_z_next * 255).astype(np.uint8)
 
             z_uint8 = ((self.z + 0.5) * 255).astype(np.uint8).reshape((16, 16))
             z_uint8 = skimage.color.gray2rgb(z_uint8)  # Make it rgb to avoid problems with pyglet
