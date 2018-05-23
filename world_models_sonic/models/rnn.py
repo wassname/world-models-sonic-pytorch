@@ -49,12 +49,10 @@ class MDNRNN2(nn.Module):
         """
         batch_size, seq_len, _ = inpt.size()
         # one hot code the action
-        
         action = torch.eye(self.action_dim)[action_discrete.long()]
         cuda = list(self.parameters())[0].is_cuda
         if cuda:
             action = action.cuda()
-
 
         if hidden_state is None:
             # use new so that we do not need to know the tensor type explicitly.
