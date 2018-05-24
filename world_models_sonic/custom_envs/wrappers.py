@@ -95,7 +95,7 @@ class WorldModelWrapper(gym.Wrapper):
     def process_obs(self, observation, action=None):
         if action is None:
             action = self.env.action_space.sample()
-        action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0)
+        action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0).float()
         observation = torch.from_numpy(observation).unsqueeze(0).transpose(1, 3)
         if self.cuda:
             action = action.cuda()
