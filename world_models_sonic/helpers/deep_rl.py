@@ -162,11 +162,11 @@ def run_iterations(agent, log_dir):
                 len(agent.last_episode_rewards)
             ))
             config.logger.info('running min/mean/max reward %2.4f/%2.4f/%2.4f of %d %2.4f s/rollout' % (
-                np.min(rewards[-config.iteration_log_interval:]),
-                np.mean(rewards[-config.iteration_log_interval:]),
-                np.max(rewards[-config.iteration_log_interval:]),
-                len(rewards[-config.iteration_log_interval:]),
-                np.mean(times[-config.iteration_log_interval:]),
+                np.min(rewards[-100:]),
+                np.mean(rewards[-100:]),
+                np.max(rewards[-100:]),
+                len(rewards[-100:]),
+                np.mean(times[-100:]),
             ))
         if iteration % (config.iteration_log_interval * 100) == 0:
             with open('%s/stats-%s-%s-online-stats-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name), 'wb') as f:
