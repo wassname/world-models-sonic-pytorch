@@ -40,7 +40,7 @@ class MDNRNN2(nn.Module):
         self.mdn = nn.Linear(hidden_size * 5, n_mixture * z_dim * 3)
         self.tau = temperature
 
-    def forward(self, inpt, action_discrete, hidden_state=None):
+    def forward(self, inpt, action_discrete=None, hidden_state=None):
         """
         :param inpt: a tensor of size (batch_size, seq_len, D)
         :param hidden_state: two tensors of size (1, batch_size, hidden_size)
@@ -48,16 +48,29 @@ class MDNRNN2(nn.Module):
         :return: pi, mean, sigma, hidden_state
         """
         batch_size, seq_len, _ = inpt.size()
+        if action_discrete is None:
+            action_discrete = torch.zeros(batch_size, seq_len)
         # one hot code the action
         action = torch.eye(self.action_dim)[action_discrete.long()]
-        cuda = list(self.parameters())[0].is_cuda
+        cuda = next(iter(self.parameters())).is_cuda
         if cuda:
             action = action.cuda()
 
         if hidden_state is None:
-            # use new so that we do not need to know the tensor type explicitly.
-            hidden_state = (Variable(inpt.data.new(1, batch_size, self.hidden_size)),
-                            Variable(inpt.data.new(1, batch_size, self.hidden_size)))
+            # you init the state to some constant value
+            # https://www.cs.toronto.edu/~hinton/csc2535/notes/lec10new.pdf
+            hidden_state = (
+                torch.zeros((1, batch_size, self.hidden_size), dtype=inpt.dtype),
+                torch.zeros((1, batch_size, self.hidden_size), dtype=inpt.dtype),
+            )
+            if cuda:
+                hidden_state = [hs.cuda() for hs in hidden_state]
+
+            for hs in hidden_state:
+                assert (hs == hs).all(), 'nans in hidden_state'
+
+        for hs in hidden_state:
+            assert (hs == hs).all(), 'nans in hidden_state'
 
         # concatenate input and action, maybe we can use an extra fc layer to project action to a space same
         # as inpt?
@@ -87,7 +100,7 @@ class MDNRNN2(nn.Module):
         # Reshape
         mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
         logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps), -np.log(eps))
-        pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim))
+        pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(eps)
 
         # Transform
         sigma = torch.exp(logsigma)
@@ -97,6 +110,10 @@ class MDNRNN2(nn.Module):
         if self.tau > 0:
             pi /= self.tau
             sigma *= self.tau ** 0.5
+
+        assert (pi == pi).all(), 'nans in pi'
+        assert (sigma == sigma).all(), 'nans in sigma'
+        assert (mu == mu).all(), 'nans in sigma'
 
         return pi, mu, sigma
 
@@ -124,11 +141,13 @@ class MDNRNN2(nn.Module):
         """
         # Reshape pi, so we can get the multinomial along the mixture dimension
         batch, seq, mixtures, z_dim = pi.size()
-        np.testing.assert_almost_equal(pi.sum(axis).cpu().data.numpy(), 1, decimal=4, err_msg='pi should be softmaxed along axis')
+        # np.testing.assert_almost_equal(pi.sum(axis).cpu().data.numpy(), 1, decimal=4, err_msg='pi should be softmaxed along axis')
+        assert ((pi.sum(axis) - 1) < 0.01).all(), 'pi should be softmaxed along axis'
         axis_size = pi.size(axis)
         pi = pi.transpose(axis, 3).contiguous()
         pi_flat = pi.view(-1, axis_size).clamp(1e-7)
-        np.testing.assert_almost_equal(pi_flat.sum(-1).cpu().data.numpy(), 1, decimal=4, err_msg='should reshape right axis')
+        assert ((pi_flat.sum(-1)-1) < 0.01).all(), 'should reshape the correct axis'
+        # np.testing.assert_almost_equal(pi_flat.sum(-1).cpu().data.numpy(), 1, decimal=4, err_msg='should reshape right axis')
         # sample
         k = torch.distributions.Multinomial(1, pi_flat).sample()
         # reshape back
@@ -147,6 +166,7 @@ class MDNRNN2(nn.Module):
             z_sample = z_normals.rsample()
         else:
             z_sample = z_normals.sample()
+        assert (z_sample == z_sample).all(), 'has nans'
         return z_sample
 
     def rnn_r_loss(self, y_true, pi, mu, sigma):

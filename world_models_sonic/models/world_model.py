@@ -10,7 +10,7 @@ class WorldModel(torch.nn.modules.Module):
         self.mdnrnn = mdnrnn
         self.finv = finv
 
-    def forward(self, x, action, hidden_state=None):
+    def forward(self, x, action=None, hidden_state=None):
         _, mu_vae, logvar_vae = self.vae.forward(x)
         z = self.vae.sample(mu_vae, logvar_vae)
         pi, mu, sigma, hidden_state = self.mdnrnn.forward(z[:, None], action, hidden_state=hidden_state)

@@ -93,28 +93,29 @@ class WorldModelWrapper(gym.Wrapper):
                                             shape=(world_model.mdnrnn.z_dim + world_model.mdnrnn.hidden_size,), dtype=np.float32)
 
     def process_obs(self, observation, action=None):
-        if action is None:
-            action = self.env.action_space.sample()
-        action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0).float()
-        observation = torch.from_numpy(observation).unsqueeze(0).transpose(1, 3)
-        if self.cuda:
-            action = action.cuda()
-            observation = observation.cuda()
+        with torch.no_grad():
+            if action is None:
+                action = self.env.action_space.sample()
+            action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0).float()
+            observation = torch.from_numpy(observation).unsqueeze(0).transpose(1, 3)
+            if self.cuda:
+                action = action.cuda()
+                observation = observation.cuda()
 
-        z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
-        z = z.squeeze(0).cpu().data.numpy()
-        z_next = z_next.squeeze(0).cpu().data.numpy()
-        latest_hidden = hidden_state[-1].squeeze(0).squeeze(0).cpu().data.numpy()
+            z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
+            z = z.squeeze(0).cpu().data.numpy()
+            z_next = z_next.squeeze(0).cpu().data.numpy()
+            latest_hidden = hidden_state[-1].squeeze(0).squeeze(0).cpu().data.numpy()
 
-        self.z = z
-        self.z_next = z_next
-        hidden_state = [h.data for h in hidden_state]  # Otherwise it doesn't garbge collect
-        if self.max_hidden_states == 1:
-            self.hidden_state = hidden_state[-1][None, :]
-        else:
-            self.hidden_state = hidden_state[-self.max_hidden_states:]
+            self.z = z
+            self.z_next = z_next
+            hidden_state = [h.data for h in hidden_state]  # Otherwise it doesn't garbge collect
+            if self.max_hidden_states == 1:
+                self.hidden_state = hidden_state[-1][None, :]
+            else:
+                self.hidden_state = hidden_state[-self.max_hidden_states:]
 
-        return np.concatenate([z, latest_hidden])
+            return np.concatenate([z, latest_hidden])
 
     def step(self, action):
         # action = action.round(0).astype(int)
@@ -188,41 +189,42 @@ class WorldModelWrapper(gym.Wrapper):
                 self.viewer_z_next.window.set_location((160 + 128) * mult, 128 * mult + margin_vert)
 
             # Decode latent vector for display
+            with torch.no_grad():
 
-            # to pytorch
-            zv = torch.from_numpy(self.z)[None, :]
-            zv_next = torch.from_numpy(self.z_next)[None, :]
-            if self.cuda:
-                zv = zv.cuda()
-                zv_next = zv_next.cuda()
+                # to pytorch
+                zv = torch.from_numpy(self.z)[None, :]
+                zv_next = torch.from_numpy(self.z_next)[None, :]
+                if self.cuda:
+                    zv = zv.cuda()
+                    zv_next = zv_next.cuda()
 
-            # Decode
-            img_z = self.world_model.vae.decode(zv)
-            img_z_next = self.world_model.vae.decode(zv_next)
+                # Decode
+                img_z = self.world_model.vae.decode(zv)
+                img_z_next = self.world_model.vae.decode(zv_next)
 
-            # to numpy images
-            img_z = img_z.squeeze(0).transpose(0, 2)
-            img_z = img_z.data.cpu().numpy()
-            img_z = (img_z * 255.0).astype(np.uint8)
-            img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1)
-            img_z_next = img_z_next.data.cpu().numpy()
-            img_z_next = (img_z_next * 255.0).astype(np.uint8)
+                # to numpy images
+                img_z = img_z.squeeze(0).transpose(0, 2)
+                img_z = img_z.data.cpu().numpy()
+                img_z = (img_z * 255.0).astype(np.uint8)
+                img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1)
+                img_z_next = img_z_next.data.cpu().numpy()
+                img_z_next = (img_z_next * 255.0).astype(np.uint8)
 
-            z_uint8 = ((self.z + 0.5) * 255).astype(np.uint8).reshape((16, 16))
-            z_uint8 = skimage.color.gray2rgb(z_uint8)  # Make it rgb to avoid problems with pyglet
-            z_uint8 = cv2.resize(z_uint8, dsize=(256, 256), interpolation=cv2.INTER_NEAREST)  # Resize manually to avoid interp of pixels
+                z_uint8 = ((self.z + 0.5) * 255).astype(np.uint8).reshape((16, 16))
+                z_uint8 = skimage.color.gray2rgb(z_uint8)  # Make it rgb to avoid problems with pyglet
+                z_uint8 = cv2.resize(z_uint8, dsize=(256, 256), interpolation=cv2.INTER_NEAREST)  # Resize manually to avoid interp of pixels
 
-            z_next_uint8 = ((self.z_next + 0.5) * 255).astype(np.uint8).reshape((16, 16))
-            z_next_uint8 = skimage.color.gray2rgb(z_next_uint8)
-            z_next_uint8 = cv2.resize(z_next_uint8, dsize=(256, 256), interpolation=cv2.INTER_NEAREST)
+                z_next_uint8 = ((self.z_next + 0.5) * 255).astype(np.uint8).reshape((16, 16))
+                z_next_uint8 = skimage.color.gray2rgb(z_next_uint8)
+                z_next_uint8 = cv2.resize(z_next_uint8, dsize=(256, 256), interpolation=cv2.INTER_NEAREST)
 
-            # Display
-            env.viewer.imshow(env.img)
-            self.viewer_img_z.imshow(img_z)
-            self.viewer_img_z_next.imshow(img_z_next)
-            self.viewer_z.imshow(z_uint8)
-            self.viewer_z_next.imshow(z_next_uint8)
-            return env.viewer.isopen
+                # Display
+                env.viewer.imshow(env.img)
+                self.viewer_img_z.imshow(img_z)
+                self.viewer_img_z_next.imshow(img_z_next)
+                self.viewer_z.imshow(z_uint8)
+                self.viewer_z_next.imshow(z_next_uint8)
+                return env.viewer.isopen
 
         return self.env.render(mode=mode, close=close)
 
@@ -285,7 +287,8 @@ class SonicDiscretizer(gym.ActionWrapper):
         self.action_space = gym.spaces.Discrete(len(self._actions))
 
     def action(self, a):  # pylint: disable=W0221
-        return self._actions[a].copy()
+        a = self._actions[a].copy()
+        return a
 
 
 class RewardScaler(gym.RewardWrapper):

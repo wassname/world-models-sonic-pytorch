@@ -2,8 +2,10 @@
 Helpers for https://github.com/ShangtongZhang/DeepRL
 """
 import torch
+import time
 from torch import nn, optim
 import numpy as np
+from tqdm import tqdm
 import pickle
 
 from deep_rl.agent import BaseAgent, Batcher
@@ -16,11 +18,10 @@ from ..custom_envs.env import make_env
 class SonicWorldModelDeepRL(BaseTask):
     """Sonic environment wrapper for deep_rl."""
 
-    def __init__(self, env_fn, name='sonic', max_steps=10000, log_dir=None, world_model_func=None, cuda=True, verbose=False):
+    def __init__(self, env_fn, name='sonic', max_steps=10000, log_dir=None, cuda=True, verbose=False):
         BaseTask.__init__(self)
         self.name = name
-        self.world_model = world_model_func()
-        self.env = WorldModelWrapper(env_fn(), self.world_model, cuda=cuda)
+        self.env = env_fn()
         self.env._max_episode_steps = max_steps
         self.action_dim = self.env.action_space.n
         self.state_dim = self.env.observation_space.shape[0]
@@ -106,7 +107,7 @@ class PPOAgent(BaseAgent):
                 obj = ratio * sampled_advantages
                 obj_clipped = ratio.clamp(1.0 - self.config.ppo_ratio_clip,
                                           1.0 + self.config.ppo_ratio_clip) * sampled_advantages
-                policy_loss = -torch.min(obj, obj_clipped).mean(0)
+                policy_loss = -torch.min(obj, obj_clipped).mean()
                 entropy_loss = - config.entropy_weight * entropy_loss.mean()
 
                 value_loss = 0.5 * (sampled_returns - values).pow(2).mean()
@@ -122,9 +123,6 @@ class PPOAgent(BaseAgent):
                 config.logger.scalar_summary('loss_entropy', entropy_loss)
                 config.logger.scalar_summary('grad_norm', grad_norm)
                 config.logger.scalar_summary('ratio', ratio.mean())
-
-                # ALSO log sampled, and predicted values
-#                 config.logger.scalar_summary('values_pred', values)
         config.logger.writer.file_writer.flush()
 
         steps = config.rollout_length * config.num_workers
@@ -135,26 +133,48 @@ class PPOAgent(BaseAgent):
 
 
 def run_iterations(agent, log_dir):
+    # TODO add tqdm
     config = agent.config
     agent_name = agent.__class__.__name__
     iteration = 0
     steps = []
     rewards = []
+    times = []
+    t0 = time.time()
+    # with tqdm(mininterval=1, unit='it', total=config.max_steps, leave=True) as prog:
     while True:
         agent.iteration()
         steps.append(agent.total_steps)
         rewards.append(np.mean(agent.last_episode_rewards))
+        times.append((time.time() - t0) / len(agent.last_episode_rewards))
+        t0 = time.time()
         if iteration % config.iteration_log_interval == 0:
-            config.logger.info('total steps %d, mean/max/min reward %f/%f/%f' % (
-                agent.total_steps, np.mean(agent.last_episode_rewards),
+            config.logger.info('total steps %d, min/mean/max reward %2.4f/%2.4f/%2.4f of %d' % (
+                agent.total_steps,
+                np.min(agent.last_episode_rewards),
+                np.mean(agent.last_episode_rewards),
                 np.max(agent.last_episode_rewards),
-                np.min(agent.last_episode_rewards)
+                len(agent.last_episode_rewards)
+            ))
+            config.logger.info('running min/mean/max reward %2.4f/%2.4f/%2.4f of %d %2.4f s/rollout' % (
+                np.min(rewards[-config.iteration_log_interval:]),
+                np.mean(rewards[-config.iteration_log_interval:]),
+                np.max(rewards[-config.iteration_log_interval:]),
+                len(rewards[-config.iteration_log_interval:]),
+                np.mean(times[-config.iteration_log_interval:]),
             ))
         if iteration % (config.iteration_log_interval * 100) == 0:
-            with open('%s/stats-%s-%s-online-stats-%s.bin' % (log_dir, agent_name, config.tag, agent.task.name), 'wb') as f:
+            with open('%s/stats-%s-%s-online-stats-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name), 'wb') as f:
                 pickle.dump({'rewards': rewards,
                              'steps': steps}, f)
-            agent.save('%s/%s-%s-model-%s.bin' % (log_dir, agent_name, config.tag, agent.task.name))
+            agent.save('%s/%s-%s-model-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name))
+        # prog.desc = 'total steps %d, mean/max/min reward %f/%f/%f of %d' % (
+        #     agent.total_steps, np.mean(rewards[-config.iteration_log_interval:]),
+        #     np.max(rewards[-config.iteration_log_interval:]),
+        #     np.min(rewards[-config.iteration_log_interval:]),
+        #     len(rewards[-config.iteration_log_interval:])
+        # )
+        # prog.update(1)
         iteration += 1
         if config.max_steps and agent.total_steps >= config.max_steps:
             agent.close()
