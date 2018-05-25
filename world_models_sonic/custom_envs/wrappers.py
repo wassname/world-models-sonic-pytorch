@@ -82,7 +82,7 @@ class WorldModelWrapper(gym.Wrapper):
         """Use the world model to give next latent state as observation."""
         super().__init__(env)
         self.world_model = world_model
-        self.max_hidden_states = 4
+        self.max_hidden_states = 6
         self.state = state
         self.img_z = None
         self.img_z_next_pred = None
@@ -98,8 +98,8 @@ class WorldModelWrapper(gym.Wrapper):
         action = torch.from_numpy(np.array(action)).unsqueeze(0).unsqueeze(0)
         observation = torch.from_numpy(observation).unsqueeze(0).transpose(1, 3)
         if self.cuda:
-            action=action.cuda()
-            observation=observation.cuda()
+            action = action.cuda()
+            observation = observation.cuda()
 
         z_next, z, hidden_state = self.world_model.forward(observation, action, hidden_state=self.hidden_state)
         z = z.squeeze(0).cpu().data.numpy()
@@ -108,7 +108,7 @@ class WorldModelWrapper(gym.Wrapper):
 
         self.z = z
         self.z_next = z_next
-        hidden_state = [h.data for h in hidden_state] # Otherwise it doesn't garbge collect
+        hidden_state = [h.data for h in hidden_state]  # Otherwise it doesn't garbge collect
         if self.max_hidden_states == 1:
             self.hidden_state = hidden_state[-1][None, :]
         else:
@@ -126,18 +126,18 @@ class WorldModelWrapper(gym.Wrapper):
         # Reset to a random level (but don't change the game)
         game = self.env.unwrapped.gamename
         game_path = retro.get_game_path(game)
-        
+
         # pick a random state that's in the same game
         game_states = train_states[train_states.game == game]
         if self.state:
-            game_states = game_states[game_states.state.str.contains(state)]
-           
+            game_states = game_states[game_states.state.str.contains(self.state)]
+
         # Load
         state = game_states.sample().iloc[0].state + '.state'
         print('reseting to', state)
         with gzip.open(os.path.join(game_path, state), 'rb') as fh:
             self.env.unwrapped.initial_state = fh.read()
-         
+
         # Reset
         self.hidden_state = None
         observation = self.env.reset()
@@ -199,10 +199,10 @@ class WorldModelWrapper(gym.Wrapper):
             # to numpy images
             img_z = img_z.squeeze(0).transpose(0, 2)
             img_z = img_z.data.cpu().numpy()
-            img_z = (img_z * 255).astype(np.uint8)
-            img_z_next = img_z_next.squeeze(0).transpose(0, 2)
+            img_z = (img_z * 255.0).astype(np.uint8)
+            img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1)
             img_z_next = img_z_next.data.cpu().numpy()
-            img_z_next = (img_z_next * 255).astype(np.uint8)
+            img_z_next = (img_z_next * 255.0).astype(np.uint8)
 
             z_uint8 = ((self.z + 0.5) * 255).astype(np.uint8).reshape((16, 16))
             z_uint8 = skimage.color.gray2rgb(z_uint8)  # Make it rgb to avoid problems with pyglet
