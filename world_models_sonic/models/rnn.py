@@ -109,7 +109,7 @@ class MDNRNN2(nn.Module):
 
         # Use pytorches normal dist class to calc the probs
         z_normals = torch.distributions.Normal(mu, sigma)
-        z_prob = z_normals.log_prob(y_true).exp()  # .clamp(logeps, -logeps).exp()
+        z_prob = z_normals.log_prob(y_true).exp().clamp(logeps, -logeps).exp()
         return (z_prob * pi).sum(2)  # weight, then sum over the mixtures
 
     def multinomial_on_axis(self, pi, axis=2):
@@ -124,10 +124,11 @@ class MDNRNN2(nn.Module):
         """
         # Reshape pi, so we can get the multinomial along the mixture dimension
         batch, seq, mixtures, z_dim = pi.size()
+        np.testing.assert_almost_equal(pi.sum(axis).cpu().data.numpy(), 1, decimal=4, err_msg='pi should be softmaxed along axis')
         axis_size = pi.size(axis)
         pi = pi.transpose(axis, 3).contiguous()
-        pi_flat = pi.view(-1, axis_size)
-        # np.testing.assert_almost_equal(pi_flat.sum(-1).cpu().data.numpy(), 1, decimal=4, err_msg='should reshape right axis')
+        pi_flat = pi.view(-1, axis_size).clamp(1e-7)
+        np.testing.assert_almost_equal(pi_flat.sum(-1).cpu().data.numpy(), 1, decimal=4, err_msg='should reshape right axis')
         # sample
         k = torch.distributions.Multinomial(1, pi_flat).sample()
         # reshape back

@@ -6,26 +6,27 @@ from torch import nn, optim
 import numpy as np
 import pickle
 
-from deep_rl.agent import  BaseAgent, Batcher
+from deep_rl.agent import BaseAgent, Batcher
 from deep_rl.component.task import BaseTask
 
 from ..custom_envs.wrappers import RenderWrapper, WorldModelWrapper
 from ..custom_envs.env import make_env
 
+
 class SonicWorldModelDeepRL(BaseTask):
     """Sonic environment wrapper for deep_rl."""
-    def __init__(self, name='sonic256', max_steps=4500, log_dir=None, world_model_func=None, state=None, game=None, cuda=True, verbose=False):
+
+    def __init__(self, env_fn, name='sonic', max_steps=10000, log_dir=None, world_model_func=None, cuda=True, verbose=False):
         BaseTask.__init__(self)
         self.name = name
         self.world_model = world_model_func()
-        self.env = WorldModelWrapper(make_env(self.name, state=state, game=game), self.world_model, cuda=cuda, state=state)
+        self.env = WorldModelWrapper(env_fn(), self.world_model, cuda=cuda)
         self.env._max_episode_steps = max_steps
         self.action_dim = self.env.action_space.n
         self.state_dim = self.env.observation_space.shape[0]
         self.env = self.set_monitor(self.env, log_dir)
         if verbose:
             self.env = RenderWrapper(self.env, mode='world_model')
-
 
 
 # modified from to log to tensorboard https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/agent/PPO_agent.py
@@ -80,10 +81,10 @@ class PPOAgent(BaseAgent):
                 td_error = rewards + config.discount * terminals * next_value.detach() - value.detach()
                 advantages = advantages * config.gae_tau * config.discount * terminals + td_error
             processed_rollout[i] = [states, actions, log_probs, returns, advantages]
-            
-            config.logger.scalar_summary('td_error', td_error.mean(), self.total_steps+i)
-            config.logger.scalar_summary('returns', returns.mean(), self.total_steps+i)
-            config.logger.scalar_summary('actions', actions, self.total_steps+i)
+
+            # config.logger.scalar_summary('td_error', td_error.mean(), self.total_steps+i)
+            # config.logger.scalar_summary('returns', returns.mean(), self.total_steps+i)
+            # config.logger.scalar_summary('actions', actions, self.total_steps+i)
 
         states, actions, log_probs_old, returns, advantages = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
         advantages = (advantages - advantages.mean()) / advantages.std()
@@ -105,33 +106,34 @@ class PPOAgent(BaseAgent):
                 obj = ratio * sampled_advantages
                 obj_clipped = ratio.clamp(1.0 - self.config.ppo_ratio_clip,
                                           1.0 + self.config.ppo_ratio_clip) * sampled_advantages
-                policy_loss = -torch.min(obj, obj_clipped).mean(0) 
+                policy_loss = -torch.min(obj, obj_clipped).mean(0)
                 entropy_loss = - config.entropy_weight * entropy_loss.mean()
 
                 value_loss = 0.5 * (sampled_returns - values).pow(2).mean()
-                
 
                 self.opt.zero_grad()
                 loss = (policy_loss + value_loss + entropy_loss)
                 loss.backward()
                 grad_norm = nn.utils.clip_grad_norm_(self.network.parameters(), config.gradient_clip)
                 self.opt.step()
-                
+
                 config.logger.scalar_summary('loss_value', value_loss)
                 config.logger.scalar_summary('loss_policy', policy_loss)
                 config.logger.scalar_summary('loss_entropy', entropy_loss)
                 config.logger.scalar_summary('grad_norm', grad_norm)
                 config.logger.scalar_summary('ratio', ratio.mean())
-                
+
                 # ALSO log sampled, and predicted values
 #                 config.logger.scalar_summary('values_pred', values)
-                config.logger.writer.file_writer.flush()
+        config.logger.writer.file_writer.flush()
 
         steps = config.rollout_length * config.num_workers
         self.total_steps += steps
 
 # From https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/utils/misc.py#L51
 # Modified to save if a differen't location
+
+
 def run_iterations(agent, log_dir):
     config = agent.config
     agent_name = agent.__class__.__name__

@@ -124,19 +124,23 @@ class WorldModelWrapper(gym.Wrapper):
 
     def reset(self):
         # Reset to a random level (but don't change the game)
-        game = self.env.unwrapped.gamename
-        game_path = retro.get_game_path(game)
+        try:
+            game = self.env.unwrapped.gamename
+        except AttributeError:
+            pass
+        else:
+            game_path = retro.get_game_path(game)
 
-        # pick a random state that's in the same game
-        game_states = train_states[train_states.game == game]
-        if self.state:
-            game_states = game_states[game_states.state.str.contains(self.state)]
+            # pick a random state that's in the same game
+            game_states = train_states[train_states.game == game]
+            if self.state:
+                game_states = game_states[game_states.state.str.contains(self.state)]
 
-        # Load
-        state = game_states.sample().iloc[0].state + '.state'
-        print('reseting to', state)
-        with gzip.open(os.path.join(game_path, state), 'rb') as fh:
-            self.env.unwrapped.initial_state = fh.read()
+            # Load
+            state = game_states.sample().iloc[0].state + '.state'
+            print('reseting to', state)
+            with gzip.open(os.path.join(game_path, state), 'rb') as fh:
+                self.env.unwrapped.initial_state = fh.read()
 
         # Reset
         self.hidden_state = None
