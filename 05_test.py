@@ -4,19 +4,18 @@ import torch
 import os
 import sys
 import logging
+from torch.nn import functional as F
 
 from deep_rl.utils import Config
-from deep_rl.utils.logger import get_logger, get_default_log_dir
-
-from deep_rl.network.network_heads import CategoricalActorCriticNet
+from deep_rl.utils.logger import get_logger
 from deep_rl.network.network_bodies import FCBody
 
 from deep_rl.component.task import ParallelizedTask
 
 from world_models_sonic.custom_envs import wrappers
-from world_models_sonic.helpers.deep_rl import PPOAgent, SonicWorldModelDeepRL, run_iterations
+from world_models_sonic.helpers.deep_rl import PPOAgent, run_iterations, SonicWorldModelDeepRL, CategoricalWorldActorCriticNet
 from world_models_sonic.models.rnn import MDNRNN2
-from world_models_sonic.models.vae import VAE6, VAE5
+from world_models_sonic.models.vae import VAE5
 from world_models_sonic.models.inverse_model import InverseModel
 from world_models_sonic.models.world_model import WorldModel
 
@@ -73,7 +72,9 @@ def load_world_models(save_file_vae, save_file_rnn, save_file_finv, image_size=2
 
 
 def main():
-    log_dir = './results' # get_default_log_dir('results')
+    verbose = False
+    NAME = 'wassname_ppo'
+    log_dir = './results'
     for dir in ['log', 'results', 'outputs', 'models', 'data', log_dir]:
         if not os.path.isdir(dir):
             os.makedirs(dir)
@@ -81,40 +82,44 @@ def main():
     print('cuda', cuda)
     print('log_dir', log_dir)
 
-    ppo_save_file = './data/checkpoints/PPO_greenfields_256z_v2_cpu.pkl'
-    ppo_save_file_reward_norm = ppo_save_file.replace('_cpu.pkl',
-                                                      '') + '_reward_norm.pkl'
-    ppo_save_file_state_norm = ppo_save_file.replace('_cpu.pkl',
-                                                     '') + '_state_norm.pkl'
+    ppo_save_file = './data/checkpoints/PPO_greenfields_256z_v4_cpu.pkl'
     save_file_rnn = './data/checkpoints/mdnrnn_state_dict_cpu.pkl'
     save_file_vae = './data/checkpoints/vae_state_dict_cpu.pkl'
     save_file_finv = './data/checkpoints/finv_state_dict_cpu.pkl'
 
     world_model = load_world_models(save_file_vae, save_file_rnn, save_file_finv, image_size=256, cuda=cuda, action_dim=10, z_dim=512)
 
+    z_state_dim = world_model.mdnrnn.z_dim + world_model.mdnrnn.hidden_size
+    print(log_dir)
+
     def task_fn(log_dir):
         return SonicWorldModelDeepRL(
-            env_fn=lambda: make_env(),
-            max_steps=10000,
+            env_fn=lambda: make_env('sonic256'),
+            max_steps=1000,
             log_dir=log_dir,
-            world_model_func=lambda: world_model,
-            verbose=False,
-            cuda=cuda
+            verbose=verbose
         )
 
     config = Config()
 
     config.num_workers = 1
-    config.task_fn = lambda: ParallelizedTask(task_fn, config.num_workers, single_process=config.num_workers == 1)
-    config.optimizer_fn = lambda params: torch.optim.RMSprop(params, 1e-3)
-    config.network_fn = lambda state_dim, action_dim: CategoricalActorCriticNet(
-        state_dim, action_dim, FCBody(state_dim), gpu=0 if cuda else -1)
+    config.task_fn = lambda: ParallelizedTask(
+        task_fn, config.num_workers, single_process=config.num_workers == 1)
+    config.optimizer_fn = lambda params: torch.optim.RMSprop(params, 3e-4)
+    config.network_fn = lambda state_dim, action_dim: CategoricalWorldActorCriticNet(
+        state_dim, action_dim, FCBody(z_state_dim, hidden_units=(64, 64), gate=F.relu), gpu=0 if cuda else -1, world_model_fn=lambda: world_model,
+        render=(config.num_workers == 1 and verbose)
+    )
     config.discount = 0.99
-    config.logger = get_logger('deep_rl_ppo', file_name='deep_rl_ppo.log', level=logging.INFO, log_dir=log_dir)
+    config.logger = get_logger(
+        NAME[-10:],
+        file_name='deep_rl_ppo.log',
+        level=logging.INFO,
+        log_dir=log_dir, )
     config.use_gae = True
     config.gae_tau = 0.95
     config.entropy_weight = 0.0001
-    config.gradient_clip = 0.4
+    config.gradient_clip = 0.2
     config.rollout_length = 128
     config.optimization_epochs = 10
     config.num_mini_batches = 4
@@ -124,10 +129,17 @@ def main():
     if os.path.isfile(ppo_save_file):
         print('loading', ppo_save_file)
         agent.load(ppo_save_file)
-        agent.config.state_normalizer.load_state_dict(torch.load(ppo_save_file_state_norm))
-        agent.config.reward_normalizer.load_state_dict(torch.load(ppo_save_file_reward_norm))
-        print('running')
-    run_iterations(agent, log_dir)
+
+    try:
+        run_iterations(agent, log_dir=log_dir)
+    except:
+        if config.num_workers == 1:
+            agent.task.tasks[0].env.close()
+        else:
+            [t.close() for t in agent.task.tasks]
+        print("saving", ppo_save_file)
+        agent.save(ppo_save_file)
+        raise
 
 
 if __name__ == '__main__':
