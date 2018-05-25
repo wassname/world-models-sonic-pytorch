@@ -211,6 +211,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         self.z_state_dim = self.world_model.mdnrnn.z_dim + self.world_model.mdnrnn.hidden_size
         self.network = ActorCriticNet(self.z_state_dim, action_dim, phi_body, actor_body, critic_body)
 
+        self.render = render
         self.viewer = None
         self.max_hidden_states = 6
         self.hidden_state = None
@@ -245,7 +246,8 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         dist = torch.distributions.Categorical(probs=prob)
         if action is None:
             action = dist.sample()
-            self.render()
+            if self.render:
+                self.render()
         log_prob = dist.log_prob(action).unsqueeze(-1)
 
         return action, log_prob, dist.entropy().unsqueeze(-1), v
