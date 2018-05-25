@@ -77,6 +77,40 @@ class WarpFrame(gym.ObservationWrapper):
         return frame
 
 
+class RandomGameReset(gym.Wrapper):
+    def __init__(self, env, state=None):
+        """Use the world model to give next latent state as observation."""
+        super().__init__(env)
+        self.state = state
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def reset(self):
+        # Reset to a random level (but don't change the game)
+        try:
+            game = self.env.unwrapped.gamename
+        except AttributeError:
+            print('no game name')
+            pass
+        else:
+            game_path = retro.get_game_path(game)
+
+            # pick a random state that's in the same game
+            game_states = train_states[train_states.game == game]
+            if self.state:
+                game_states = game_states[game_states.state.str.contains(self.state)]
+
+            # Load
+            state = game_states.sample().iloc[0].state + '.state'
+            print('reseting to', state)
+            with gzip.open(os.path.join(game_path, state), 'rb') as fh:
+                self.env.unwrapped.initial_state = fh.read()
+
+        return self.env.reset()
+
+
+
 class WorldModelWrapper(gym.Wrapper):
     def __init__(self, env, world_model, cuda=True, state=None):
         """Use the world model to give next latent state as observation."""
