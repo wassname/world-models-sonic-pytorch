@@ -38,7 +38,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         self._render = render
         self.z_shape = z_shape
         self.viewer = None
-        self.max_hidden_states = 6
+        self.max_hidden_states = 2
         self.hidden_state = None
         self.set_gpu(gpu)
 
@@ -47,54 +47,41 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         hidden_states = torch.cat(hidden_states, dim=0).transpose(0, 1).contiguous()
         batch_size = hidden_states.size(0)
         pad = self.max_hidden_states - hidden_states.size(1)
-        padding = torch.zeros(batch_size, pad, self.world_model.mdnrnn.z_dim)
-        if hidden_states.is_cuda:
-            padding = padding.cuda()
-        hidden_states = torch.cat([padding, hidden_states], dim=1)
+        if pad > 0:
+            padding = torch.zeros(batch_size, pad, self.world_model.mdnrnn.hidden_size)
+            if hidden_states.is_cuda:
+                padding = padding.cuda()
+                hidden_states = torch.cat([padding, hidden_states], dim=1)
         return hidden_states
 
     def process_obs(self, obs, action=None, next_obs=None, hidden_state=None):
         """Convert observation to latent space using world model."""
-        is_rollout = next_obs is None
-        cuda = next(iter(self.parameters())).is_cuda
-        batch_size = obs.shape[0]
         self.img = obs
-        if hidden_state is None:
-            hidden_state = torch.zeros(batch_size, self.max_hidden_states, self.world_model.mdnrnn.z_dim)
-            if cuda:
-                hidden_state = hidden_state.cuda()
+        is_rollout = next_obs is None
+        batch_size = obs.shape[0]
 
-        # # We will keep it in the train phase the whole time so it samples randomly
-        # # (in eval phase it just takes the mean)
-        # self.world_model.train()
+        obs = self.tensor(obs).transpose(1, 3).contiguous()
+        hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
 
         # Input is (batch, height, width, channels)
-        obs = self.tensor(obs).transpose(1, 3).contiguous()
         if is_rollout:
             # when we don't get an action (e.g. rollout) just use null action to make prediction
             action = torch.zeros(batch_size, 1)
-            hidden_state = [h.detach() for h in hidden_state.transpose(1, 0).detach()]
             z_next, z, hidden_state = self.world_model.forward(
                 obs.detach(),
                 action.detach(),
                 hidden_state=hidden_state
             )
-            # self.hidden_state = hidden_state[-self.max_hidden_states:]
             self.z = z.data
             self.z_next = z_next.data
         else:
-            # Zero the hidden state if we are in an optimization iter since they arn't ordered
-            # self.hidden_state = None
-
             next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
-            # if hidden_state is not None:
-            # raise Exception('check hidden state should be list of (6,512)s')
-            # hidden_state = [h.detach() for h in hidden_state.transpose(1, 0).detach()]
             z_next, z, hidden_state, info_world_model = self.world_model.forward_train(
                 obs.detach(),
                 action.detach(),
                 next_obs.detach(),
-                hidden_state.transpose(1, 0).contiguous().detach()
+                # hidden_state.transpose(1, 0).contiguous().detach() if hidden_state is not None else None
+                hidden_state
             )
 
         latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat

@@ -1,10 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from torch import normal, multinomial
 import torch.distributions
-from torch.autograd import Variable
-from torch import normal, multinomial
 import math
 import numpy as np
 
@@ -15,15 +12,16 @@ logeps = math.log(eps)
 class MDNRNN2(nn.Module):
     def __init__(self, z_dim, action_dim, hidden_size, n_mixture, temperature):
         """
-            :param z_dim: the dimension of VAE latent variable
-            :param hidden_size: hidden size of RNN
-            :param n_mixture: number of Gaussian Mixture Models to be used
-            :param temperature: controls the randomness of the model
+        MDNRNN stands for Mixture Density Network - RNN.
 
-            MDNRNN stands for Mixture Density Network - RNN.
-            The output of this model is [mean, sigma^2, K],
-            where mean and sigma^2 have z_dim * n_mixture elements and
-            K has n_mixture elements.
+        :param z_dim: the dimension of VAE latent variable
+        :param hidden_size: hidden size of RNN
+        :param n_mixture: number of Gaussian Mixture Models to be used
+        :param temperature: controls the randomness of the model
+
+        The output of this model is [mean, sigma^2, K],
+        where mean and sigma^2 have z_dim * n_mixture elements and
+        K has n_mixture elements.
         """
         super(MDNRNN2, self).__init__()
         # define rnn
@@ -119,8 +117,6 @@ class MDNRNN2(nn.Module):
 
     def normal_prob(self, y_true, mu, sigma, pi):
         """Probability of a value given the distribution."""
-        rollout_length = y_true.size(1)
-
         # Repeat, for number of repeated mixtures
         y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
 
@@ -146,7 +142,7 @@ class MDNRNN2(nn.Module):
         axis_size = pi.size(axis)
         pi = pi.transpose(axis, 3).contiguous()
         pi_flat = pi.view(-1, axis_size).clamp(1e-7)
-        assert ((pi_flat.sum(-1)-1) < 0.01).all(), 'should reshape the correct axis'
+        assert ((pi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
         # np.testing.assert_almost_equal(pi_flat.sum(-1).cpu().data.numpy(), 1, decimal=4, err_msg='should reshape right axis')
         # sample
         k = torch.distributions.Multinomial(1, pi_flat).sample()
