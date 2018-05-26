@@ -140,6 +140,8 @@ class VAE5(nn.Module):
         else:
             return mu
 
+    def loss(self, *args, **kwargs):
+        return loss_function_vae(*args, **kwargs)
 
 class BasicConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, **kwargs):
@@ -332,6 +334,8 @@ class VAE6(nn.Module):
         else:
             return mu
 
+    def loss(self, *args, **kwargs):
+        return loss_function_vae(*args, **kwargs)
 
 class VAE7(nn.Module):
     """
@@ -428,6 +432,9 @@ class VAE7(nn.Module):
             return z_normals.rsample()
         else:
             return z_normals.sample()
+
+    def loss(self, *args, **kwargs):
+        return loss_function_vae(*args, **kwargs)
     #
     # def sample(self, mu, logvar):
     #     """Sample z from Z."""

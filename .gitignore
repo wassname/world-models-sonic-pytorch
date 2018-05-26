@@ -5,8 +5,10 @@
 /models/
 /log/
 /oldnotebooks/
-/nohup.out
+/results/
 /data/*.bin
+/nohup.out
+.secrets.env
 
 # Created by .ignore support plugin (hsz.mobi)
 .gitignore
