@@ -204,14 +204,17 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                  critic_body=None,
                  world_model_fn=None,
                  gpu=-1,
-                 render=False
+                 render=False,
+                 z_shape=(16, 16),
+                 logger=None
                  ):
         super().__init__()
         self.world_model = world_model_fn()
         self.z_state_dim = self.world_model.mdnrnn.z_dim + self.world_model.mdnrnn.hidden_size
         self.network = ActorCriticNet(self.z_state_dim, action_dim, phi_body, actor_body, critic_body)
 
-        self.render = render
+        self._render = render
+        self.z_shape = z_shape
         self.viewer = None
         self.max_hidden_states = 6
         self.hidden_state = None
@@ -219,23 +222,25 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
 
     def predict(self, obs, action=None):
         self.img = obs
-        with torch.no_grad():
-            # Input is (batch, samples...)
-            obs = self.tensor(obs).transpose(1, 3)
+        # Input is (batch, samples...)
+        obs = self.tensor(obs).transpose(1, 3).contiguous()
 
-            # Use world model to transform obs
-            if self.hidden_state and (obs.size(0) != self.hidden_state[0].size(0) or obs.size(1) != self.hidden_state[0].size(1)):
-                self.hidden_state = None
-            z_next, z, hidden_state = self.world_model.forward(obs, hidden_state=self.hidden_state)
+        # Use world model to transform obs
+        if self.hidden_state and (obs.size(0) != self.hidden_state[0].size(0) or obs.size(1) != self.hidden_state[0].size(1)):
+            self.hidden_state = None
+        self.world_model.train()
+        z_next, z, hidden_state, info_world_model = self.world_model.forward_train(obs, hidden_state=self.hidden_state)
 
-            hidden_state = [h.data for h in hidden_state]  # Otherwise it doesn't garbge collect
-            self.hidden_state = hidden_state[-self.max_hidden_states:]
-            self.z = z.data
-            self.z_next = z_next.data
+        # hidden_state = [h.data for h in hidden_state]  # Otherwise it doesn't garbge collect
+        self.hidden_state = hidden_state[-self.max_hidden_states:]
+        # TODO do I need to garbage collect these since they still have graph attached? [h.data for hidden_state[:-self.max_hidden_states]
+        self.z = z.data
+        self.z_next = z_next.data
 
-            latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
+        latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
+
         obs = torch.cat([z, latest_hidden], -1)
-        obs.requires_grad = True
+        obs.detach()
 
         # Predict next action and value
         phi = self.network.phi_body(obs)
@@ -246,7 +251,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         dist = torch.distributions.Categorical(probs=prob)
         if action is None:
             action = dist.sample()
-            if self.render:
+            if self._render:
                 self.render()
         log_prob = dist.log_prob(action).unsqueeze(-1)
 
@@ -282,11 +287,12 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 self.viewer_img_z_next.window.set_location((160 + 128) * mult, 0 * mult)
 
                 self.viewer_z = SimpleImageViewer()
-                self.viewer_z.window = pyglet.window.Window(width=128 * mult, height=128 * mult, vsync=False, resizable=True, caption='latent vector')
+                self.viewer_z.window = pyglet.window.Window(
+                    width=self.z_shape[0] * 4 * mult, height=self.z_shape[1] * 4 * mult, vsync=False, resizable=True, caption='latent vector')
                 self.viewer_z.window.set_location(160 * mult, 128 * mult + margin_vert)
 
                 self.viewer_z_next = SimpleImageViewer()
-                self.viewer_z_next.window = pyglet.window.Window(width=128 * mult, height=128 * mult, vsync=False,
+                self.viewer_z_next.window = pyglet.window.Window(width=self.z_shape[0] * 4 * mult, height=self.z_shape[1] * 4 * mult, vsync=False,
                                                                  resizable=True, caption='latent predicted vector')
                 self.viewer_z_next.window.set_location((160 + 128) * mult, 128 * mult + margin_vert)
 
@@ -312,13 +318,16 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 img_z_next = img_z_next.data.cpu().numpy()
                 img_z_next = (img_z_next * 255.0).astype(np.uint8)
 
-                z_uint8 = ((self.z[0].data.cpu().numpy() + 0.5) * 255).astype(np.uint8).reshape((16, 16))
+                z_uint8 = ((self.z[0].data.cpu().numpy() + 0.5) * 255).astype(np.uint8)
+                z_uint8 = z_uint8.reshape(self.z_shape)
                 z_uint8 = skimage.color.gray2rgb(z_uint8)  # Make it rgb to avoid problems with pyglet
-                z_uint8 = cv2.resize(z_uint8, dsize=(256, 256), interpolation=cv2.INTER_NEAREST)  # Resize manually to avoid interp of pixels
+                z_uint8 = cv2.resize(z_uint8, dsize=(self.z_shape[0] * 4, self.z_shape[1] * 4),
+                                     interpolation=cv2.INTER_NEAREST)  # Resize manually to avoid interp of pixels
 
-                z_next_uint8 = ((self.z_next[0].data.cpu().numpy() + 0.5) * 255).astype(np.uint8).reshape((16, 16))
+                z_next_uint8 = ((self.z_next[0].data.cpu().numpy() + 0.5) * 255).astype(np.uint8)
+                z_next_uint8 = z_next_uint8.reshape(self.z_shape)
                 z_next_uint8 = skimage.color.gray2rgb(z_next_uint8)
-                z_next_uint8 = cv2.resize(z_next_uint8, dsize=(256, 256), interpolation=cv2.INTER_NEAREST)
+                z_next_uint8 = cv2.resize(z_next_uint8, dsize=(self.z_shape[0] * 4, self.z_shape[1] * 4), interpolation=cv2.INTER_NEAREST)
 
                 # Display
                 img = self.img[0] * 255
