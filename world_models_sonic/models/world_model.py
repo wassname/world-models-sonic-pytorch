@@ -66,10 +66,17 @@ class WorldModel(torch.nn.modules.Module):
 
         loss = self.lambda_vae * loss_vae + loss_mdn + self.lambda_finv * loss_inv
 
+        # TODO ideally should pass the losses back to the agent and do logging and backprop there
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
         # self.scheduler.step()
+
+        self.last_loss_vae = loss_vae.mean().data.cpu().item()
+        self.last_loss_KLD = loss_KLD.mean().data.cpu().item()
+        self.last_loss_recon = loss_recon.mean().data.cpu().item()
+        self.last_loss_mdn = loss_mdn.mean().data.cpu().item()
+        self.last_loss_inv = loss_inv.mean().data.cpu().item()
 
         # Record
         if self.logger:

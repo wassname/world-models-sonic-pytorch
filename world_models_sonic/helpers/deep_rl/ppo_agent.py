@@ -68,9 +68,10 @@ class PPOAgent(BaseAgent):
                 advantages = advantages * config.gae_tau * config.discount * terminals + td_error
             processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states]
 
-            # config.logger.scalar_summary('td_error', td_error.mean(), self.total_steps+i)
-            # config.logger.scalar_summary('returns', returns.mean(), self.total_steps+i)
-            # config.logger.scalar_summary('actions', actions, self.total_steps+i)
+            if i % 10 == 0:
+                config.logger.scalar_summary('td_error', td_error.mean(), self.total_steps + i)
+                config.logger.scalar_summary('returns', returns.mean(), self.total_steps + i)
+                # config.logger.scalar_summary('actions', actions, self.total_steps+i)
 
         # Concat the rollout vars
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
@@ -116,6 +117,7 @@ class PPOAgent(BaseAgent):
                 config.logger.scalar_summary('loss_entropy', entropy_loss)
                 config.logger.scalar_summary('grad_norm', grad_norm)
                 config.logger.scalar_summary('ratio', ratio.mean())
+                config.logger.scalar_summary('sampled_returns', sampled_returns.mean())
         config.logger.writer.file_writer.flush()
 
         steps = config.rollout_length * config.num_workers

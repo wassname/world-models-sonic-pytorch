@@ -86,7 +86,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
 
         latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
         obs = torch.cat([z, latest_hidden], -1).detach()  # Gradient block between world model and controller
-        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:])
+        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach()
 
     def predict(self, obs, action=None, next_obs=None, hidden_state=None):
         # In rollout (non training mode) when no next_obs is provided

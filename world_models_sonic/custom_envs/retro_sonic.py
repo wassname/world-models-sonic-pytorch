@@ -51,7 +51,7 @@ def make(game, state, discrete_actions=False, bk2dir=None):
     if bk2dir:
         env.auto_record(bk2dir)
     env = retro_contest.StochasticFrameSkip(env, n=4, stickprob=0.25)
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=4500)
+    env = gym.wrappers.TimeLimit(env, max_episode_steps=2500)
     return env
 
 
@@ -72,9 +72,10 @@ def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk
     env = make(game=start_state.game, state=start_state.state)
     env = wrappers.RewardScaler(env)
     env = wrappers.SonicDiscretizer(env)
-    env = wrappers.AllowBacktracking(env)
+    # env = wrappers.AllowBacktracking(env)
     env = wrappers.ScaledFloatFrame(env)
     env = wrappers.WarpFrame(env, image_size, image_size, to_gray=False)
+    env = wrappers.StochasticFrameSkip2(env, n=4, stickprob=0)
     if slow:
         env = wrappers.SlowFrames(env)
     return env
