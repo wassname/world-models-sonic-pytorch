@@ -58,7 +58,7 @@ def run_iterations(agent, log_dir):
                 pickle.dump({'rewards': history['rewards'],
                              'steps': history['steps']}, f)
             agent.save('%s/%s-%s-model-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name))
-            torch.save(agent.network.world_model.state_dict(), '%s/%s-%s-world_model-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name))
+            # torch.save(agent.network.world_model.state_dict(), '%s/%s-%s-world_model-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name))
         iteration += 1
         if config.max_steps and agent.total_steps >= config.max_steps:
             agent.close()

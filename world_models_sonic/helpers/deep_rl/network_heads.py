@@ -54,7 +54,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 hidden_states = torch.cat([padding, hidden_states], dim=1)
         return hidden_states
 
-    def process_obs(self, obs, action=None, next_obs=None, hidden_state=None):
+    def process_obs(self, obs, action=None, next_obs=None, hidden_state=None, model_train=True):
         """Convert observation to latent space using world model."""
         self.img = obs
         is_rollout = next_obs is None
@@ -64,17 +64,18 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
 
         # Input is (batch, height, width, channels)
-        if is_rollout:
-            # when we don't get an action (e.g. rollout) just use null action to make prediction
-            action = torch.zeros(batch_size, 1)
-            z_next, z, hidden_state = self.world_model.forward(
-                obs.detach(),
-                action.detach(),
-                hidden_state=hidden_state
-            )
-            self.z = z.data
-            self.z_next = z_next.data
-            loss_reduction = None
+        if is_rollout or (not model_train):
+            with torch.no_grad():
+                # when we don't get an action (e.g. rollout) just use null action to make prediction
+                action = torch.zeros(batch_size, 1)
+                z_next, z, hidden_state = self.world_model.forward(
+                    obs.detach(),
+                    action.detach(),
+                    hidden_state=hidden_state
+                )
+                self.z = z.data
+                self.z_next = z_next.data
+                loss_reduction = None
         else:
             next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
             _, _, _, info_world_model_before = self.world_model.forward_train(
@@ -107,11 +108,11 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         obs = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
         return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach(), loss_reduction
 
-    def predict(self, obs, action=None, next_obs=None, hidden_state=None):
+    def predict(self, obs, action=None, next_obs=None, hidden_state=None, model_train=True):
         # In rollout (non training mode) when no next_obs is provided
         is_rollout = next_obs is None
 
-        obs_z, hidden_state, loss_reduction = self.process_obs(obs, action, next_obs, hidden_state)
+        obs_z, hidden_state, loss_reduction = self.process_obs(obs, action, next_obs, hidden_state, model_train=model_train)
 
         # Predict next action and value
         phi = self.network.phi_body(obs_z)

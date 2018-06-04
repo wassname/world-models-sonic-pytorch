@@ -86,31 +86,39 @@ class PPOAgent(BaseAgent):
         rollout.append([states, pending_value, None, None, None, None, None])
 
         # Train world model here and update values with curiosity reward, before we calculate advantages
+        # For an intro to the idea see :https://arxiv.org/abs/1705.05363 . But my approach is to make the reward
+        # the reduction of loss from a state, similar to mentioned here http://people.idsia.ch/~juergen/creativity.html
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = self.process_rollout(rollout, pending_value)
         batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
+        extrinsic = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
         batcher.shuffle()
         while not batcher.end():
             batch_indices = batcher.next_batch()[0]
             batch_indices = self.network.tensor(batch_indices).long()
+
             sampled_states = states[batch_indices]
             sampled_actions = actions[batch_indices]
-            # sampled_log_probs_old = log_probs_old[batch_indices]
-            # sampled_returns = returns[batch_indices]
-            # sampled_advantages = advantages[batch_indices]
             sampled_next_states = next_states[batch_indices]
             sampled_hidden_states = hidden_states[batch_indices]
 
             _, log_probs, entropy_loss, values, hidden_state, loss_reduction = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
 
-            extristic = torch.stack([rollout[i][4][j] for i, j in inds[batch_indices]])
+            # Update reward in the rollout, using reducing in loss: curiosity
             for k, (i, j) in enumerate(inds[batch_indices]):
                 if config.curiosity_only:
                     rollout[i][4][j] = loss_reduction[k] * config.curiosity_weight
                 else:
                     rollout[i][4][j] += loss_reduction[k] * config.curiosity_weight
-        print('sampled extristic vs intrinsic reward {:2.4f} {:2.4f}'.format(extristic.mean().cpu().item(), loss_reduction.mean().cpu().item() * config.curiosity_weight))
-        config.logger.scalar_summary('reward_extristic', extristic.mean())
-        config.logger.scalar_summary('reward_intrinsic', loss_reduction.mean())
+
+        # Log
+        extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+        if config.curiosity_only:
+            instrinsic = extrinsic_after
+        else:
+            instrinsic = extrinsic_after - extrinsic
+        config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
+        config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
+        print('rollout extrinsic vs intrinsic reward {:2.4f} {:2.4f}'.format(extrinsic.mean().cpu().item(), instrinsic.mean().cpu().item() * config.curiosity_weight))
 
         # Calculate advantages again now that we have changed the rewards
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
@@ -130,7 +138,7 @@ class PPOAgent(BaseAgent):
                 sampled_next_states = next_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                _, log_probs, entropy_loss, values, hidden_state, loss_reduction = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
+                _, log_probs, entropy_loss, values, hidden_state, _ = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, model_train=False)
                 # sampled_returns += loss_reduction  # curiosity reward, lets update just for training the value function?
                 ratio = (log_probs - sampled_log_probs_old).exp()
                 obj = ratio * sampled_advantages

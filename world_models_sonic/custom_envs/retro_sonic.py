@@ -72,7 +72,7 @@ def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk
     env = make(game=start_state.game, state=start_state.state, max_episode_steps=max_episode_steps)
     env = wrappers.RewardScaler(env)
     env = wrappers.SonicDiscretizer(env)
-    # env = wrappers.AllowBacktracking(env)
+    env = wrappers.AllowBacktracking(env)
     env = wrappers.ScaledFloatFrame(env)
     env = wrappers.WarpFrame(env, image_size, image_size, to_gray=to_gray)
     env = wrappers.StochasticFrameSkip2(env, n=4, stickprob=0)
