@@ -19,6 +19,39 @@ class PPOAgent(BaseAgent):
         self.states = self.task.reset()
         self.states = config.state_normalizer(self.states)
 
+    def process_rollout(self, rollout, pending_value):
+        config = self.config
+        processed_rollout = [None] * (len(rollout) - 1)
+        advantages = self.network.tensor(np.zeros((config.num_workers, 1)))
+        returns = pending_value.detach()
+        for i in reversed(range(len(rollout) - 1)):
+            states, value, actions, log_probs, rewards, terminals, next_states, hidden_states = rollout[i]
+            # terminals = self.network.tensor(terminals).unsqueeze(1)
+            # rewards = self.network.tensor(rewards).unsqueeze(1)
+            actions = self.network.tensor(actions)
+            states = self.network.tensor(states)
+            next_states = self.network.tensor(next_states)
+            hidden_states = self.network.tensor(hidden_states)
+
+            next_value = rollout[i + 1][1]
+            returns = rewards + config.discount * terminals * returns
+            if not config.use_gae:
+                advantages = returns - value.detach()
+            else:
+                td_error = rewards + config.discount * terminals * next_value.detach() - value.detach()
+                advantages = advantages * config.gae_tau * config.discount * terminals + td_error
+
+            # inds = zip([i] * len(rewards), range(len(rewards)))
+            inds = zip([i] * len(rewards), range(len(rewards)))
+            inds = self.network.tensor(list(inds)).long()
+            processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states, inds]
+
+        # Concat the rollout vars
+        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
+
+        advantages = (advantages - advantages.mean()) / advantages.std()
+        return states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds
+
     def iteration(self):
         config = self.config
         rollout = []
@@ -27,7 +60,7 @@ class PPOAgent(BaseAgent):
 
         for _ in range(config.rollout_length):
             with torch.no_grad():
-                actions, log_probs, _, values, hidden_states = self.network.predict(states, hidden_state=hidden_states)
+                actions, log_probs, _, values, hidden_states, loss_reduction = self.network.predict(states, hidden_state=hidden_states)
             next_states, rewards, terminals, _ = self.task.step(actions.cpu().detach().numpy())
             self.episode_rewards += rewards
             rewards = config.reward_normalizer(rewards)
@@ -36,52 +69,53 @@ class PPOAgent(BaseAgent):
                     self.last_episode_rewards[i] = self.episode_rewards[i]
                     self.episode_rewards[i] = 0
             next_states = config.state_normalizer(next_states)
-            rollout.append([states, values.detach(), actions.detach(), log_probs.detach(), rewards, 1 - terminals, next_states, hidden_states.detach()])
+            rollout.append([
+                self.network.tensor(states),
+                values.detach(),
+                actions.detach(),
+                log_probs.detach(),
+                self.network.tensor(rewards).unsqueeze(1),
+                self.network.tensor(1 - terminals).unsqueeze(1),
+                self.network.tensor(next_states),
+                hidden_states.detach()
+            ])
             states = next_states
 
         self.states = states
-        pending_value = self.network.predict(states)[-2]
-        rollout.append([states, pending_value, None, None, None, None, None, None])
+        _, _, _, pending_value, _, _ = self.network.predict(states)
+        rollout.append([states, pending_value, None, None, None, None, None])
 
-        processed_rollout = [None] * (len(rollout) - 1)
-        advantages = self.network.tensor(np.zeros((config.num_workers, 1)))
-        returns = pending_value.detach()
-        for i in reversed(range(len(rollout) - 1)):
-            states, value, actions, log_probs, rewards, terminals, next_states, hidden_states = rollout[i]
-            terminals = self.network.tensor(terminals).unsqueeze(1)
-            rewards = self.network.tensor(rewards).unsqueeze(1)
-            actions = self.network.tensor(actions)
-            states = self.network.tensor(states)
-            next_states = self.network.tensor(next_states)
-            hidden_states = self.network.tensor(hidden_states)
+        # Train world model here and update values with curiosity reward, before we calculate advantages
+        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = self.process_rollout(rollout, pending_value)
+        batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
+        batcher.shuffle()
+        while not batcher.end():
+            batch_indices = batcher.next_batch()[0]
+            batch_indices = self.network.tensor(batch_indices).long()
+            sampled_states = states[batch_indices]
+            sampled_actions = actions[batch_indices]
+            # sampled_log_probs_old = log_probs_old[batch_indices]
+            # sampled_returns = returns[batch_indices]
+            # sampled_advantages = advantages[batch_indices]
+            sampled_next_states = next_states[batch_indices]
+            sampled_hidden_states = hidden_states[batch_indices]
 
-            # For hidden states we will pad them to a consistent length then stack
+            _, log_probs, entropy_loss, values, hidden_state, loss_reduction = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
 
-            # hidden_states = self.network.tensor(torch.stack(hidden_states, 1)) # (batch, num_hidden_states, z_dims)
-            # hidden_states = self.network.tensor(torch.stack(hidden_states, dim=0))
-            next_value = rollout[i + 1][1]
-            returns = rewards + config.discount * terminals * returns
-            if not config.use_gae:
-                advantages = returns - value.detach()
-            else:
-                td_error = rewards + config.discount * terminals * next_value.detach() - value.detach()
-                advantages = advantages * config.gae_tau * config.discount * terminals + td_error
-            processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states]
+            extristic = torch.stack([rollout[i][4][j] for i, j in inds[batch_indices]])
+            for k, (i, j) in enumerate(inds[batch_indices]):
+                if config.curiosity_only:
+                    rollout[i][4][j] = loss_reduction[k] * config.curiosity_weight
+                else:
+                    rollout[i][4][j] += loss_reduction[k] * config.curiosity_weight
+        print('sampled extristic vs intrinsic reward {:2.4f} {:2.4f}'.format(extristic.mean().cpu().item(), loss_reduction.mean().cpu().item() * config.curiosity_weight))
+        config.logger.scalar_summary('reward_extristic', extristic.mean())
+        config.logger.scalar_summary('reward_intrinsic', loss_reduction.mean())
 
-            if i % 10 == 0:
-                config.logger.scalar_summary('td_error', td_error.mean(), self.total_steps + i)
-                config.logger.scalar_summary('returns', returns.mean(), self.total_steps + i)
-                # config.logger.scalar_summary('actions', actions, self.total_steps+i)
+        # Calculate advantages again now that we have changed the rewards
+        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
 
-        # Concat the rollout vars
-        states, actions, log_probs_old, returns, advantages, next_states, hidden_states = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
-        # states, actions, log_probs_old, returns, advantages, next_states, hidden_states = zip(*processed_rollout)
-        # states, actions, log_probs_old, returns, advantages, next_states = map(lambda x: torch.cat(x, dim=0), [states, actions, log_probs_old, returns, advantages, next_states])
-        # hidden_states2 = list(map(lambda x: torch.cat(x, dim=0), zip(*hidden_states)))
-        # print(len(hidden_states2), hidden_states2[0].shape)
-
-        advantages = (advantages - advantages.mean()) / advantages.std()
-
+        # Now train PPO
         batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
         for _ in range(config.optimization_epochs):
             batcher.shuffle()
@@ -96,7 +130,8 @@ class PPOAgent(BaseAgent):
                 sampled_next_states = next_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                _, log_probs, entropy_loss, values, hidden_state = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
+                _, log_probs, entropy_loss, values, hidden_state, loss_reduction = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
+                # sampled_returns += loss_reduction  # curiosity reward, lets update just for training the value function?
                 ratio = (log_probs - sampled_log_probs_old).exp()
                 obj = ratio * sampled_advantages
                 obj_clipped = ratio.clamp(1.0 - self.config.ppo_ratio_clip,

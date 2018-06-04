@@ -26,7 +26,7 @@ class WorldModel(torch.nn.modules.Module):
         z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
         return z_next_pred.squeeze(1), z, hidden_state
 
-    def forward_train(self, X, actions=None, X_next=None, hidden_state=None):
+    def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
         seq_len = 1
         batch_size = X.size(0)
         cuda = next(iter(self.parameters())).is_cuda
@@ -37,7 +37,7 @@ class WorldModel(torch.nn.modules.Module):
 
         loss_recon, loss_KLD = self.vae.loss(Y, X, mu_vae, logvar)
         loss_vae = loss_recon + self.lambda_vae_kld * torch.abs(loss_KLD - self.C)
-        loss_vae = loss_vae.mean()  # mean along the batches
+        # loss_vae = loss_vae.mean()  # mean along the batches
 
         # MDNRNN Forward
         z_obs = self.vae.sample(mu_vae, logvar)
@@ -54,37 +54,36 @@ class WorldModel(torch.nn.modules.Module):
         # We are evaluating how the output distribution for the next step
         # matches the real next step. So we have to discard the last step in the
         # sequence which has no next step.
-        # z_true_next = z_obs[:, 1:]
-        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, pi, mu, sigma).mean()
+        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, pi, mu, sigma).mean(1)
 
         # Finv forward
         z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
         action_pred = self.finv(z_obs, z_next_pred).float()
         actions_hot = torch.eye(self.mdnrnn.action_dim)[actions.long()].cuda()
-        loss_inv = F.binary_cross_entropy_with_logits(action_pred, actions_hot)
-        loss_inv = loss_inv.mean()
+        loss_inv = F.binary_cross_entropy_with_logits(action_pred, actions_hot, reduce=False).mean(2).mean(1)
 
         loss = self.lambda_vae * loss_vae + loss_mdn + self.lambda_finv * loss_inv
 
         # TODO ideally should pass the losses back to the agent and do logging and backprop there
-        loss.backward()
-        self.optimizer.step()
-        self.optimizer.zero_grad()
-        # self.scheduler.step()
+        if not test:
+            loss.mean().backward()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            # self.scheduler.step()
 
-        self.last_loss_vae = loss_vae.mean().data.cpu().item()
-        self.last_loss_KLD = loss_KLD.mean().data.cpu().item()
-        self.last_loss_recon = loss_recon.mean().data.cpu().item()
-        self.last_loss_mdn = loss_mdn.mean().data.cpu().item()
-        self.last_loss_inv = loss_inv.mean().data.cpu().item()
+            self.last_loss_vae = loss_vae.mean().data.cpu().item()
+            self.last_loss_KLD = loss_KLD.mean().data.cpu().item()
+            self.last_loss_recon = loss_recon.mean().data.cpu().item()
+            self.last_loss_mdn = loss_mdn.mean().data.cpu().item()
+            self.last_loss_inv = loss_inv.mean().data.cpu().item()
 
-        # Record
-        if self.logger:
-            self.logger.scalar_summary('loss_vae', loss_vae.mean())
-            self.logger.scalar_summary('loss_recon', loss_recon.mean())
-            self.logger.scalar_summary('loss_KLD', loss_KLD.mean())
-            self.logger.scalar_summary('loss_mdn', loss_mdn.mean())
-            self.logger.scalar_summary('loss_inv', loss_inv.mean())
-            self.logger.scalar_summary('loss_world_model', loss.mean())
+            # Record
+            if self.logger:
+                self.logger.scalar_summary('loss_vae', loss_vae.mean())
+                self.logger.scalar_summary('loss_recon', loss_recon.mean())
+                self.logger.scalar_summary('loss_KLD', loss_KLD.mean())
+                self.logger.scalar_summary('loss_mdn', loss_mdn.mean())
+                self.logger.scalar_summary('loss_inv', loss_inv.mean())
+                self.logger.scalar_summary('loss_world_model', loss.mean())
 
-        return z_next_pred.squeeze(1), z_obs.squeeze(1), hidden_state, {}
+        return z_next_pred.squeeze(1), z_obs.squeeze(1), hidden_state, {'loss': loss}

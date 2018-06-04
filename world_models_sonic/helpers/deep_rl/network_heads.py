@@ -74,19 +74,30 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
             )
             self.z = z.data
             self.z_next = z_next.data
+            loss_reduction = None
         else:
             next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
-            z_next, z, hidden_state, info_world_model = self.world_model.forward_train(
+            _, _, _, info_world_model_before = self.world_model.forward_train(
                 obs.detach(),
                 action.detach(),
                 next_obs.detach(),
-                # hidden_state.transpose(1, 0).contiguous().detach() if hidden_state is not None else None
                 hidden_state
             )
 
+            # Do it again with no backprop to see how much we learned
+            with torch.no_grad():
+                z_next, z, hidden_state, info_world_model_after = self.world_model.forward_train(
+                    obs.detach(),
+                    action.detach(),
+                    next_obs.detach(),
+                    hidden_state,
+                    test=True
+                )
+
+            loss_reduction = (info_world_model_before['loss'] - info_world_model_after['loss']).detach()
+
         # I want it to know what action it did last, so it could copy. So I'm going to add the one-hot action to the state
         action_1hot = torch.eye(self.world_model.mdnrnn.action_dim)[action.long().squeeze()]
-        # if len(action_1hot.size()) == 1:
         action_1hot = action_1hot.view(z.size(0), -1)
         cuda = next(iter(self.parameters())).is_cuda
         if cuda:
@@ -94,13 +105,13 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
 
         latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
         obs = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
-        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach()
+        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach(), loss_reduction
 
     def predict(self, obs, action=None, next_obs=None, hidden_state=None):
         # In rollout (non training mode) when no next_obs is provided
         is_rollout = next_obs is None
 
-        obs_z, hidden_state = self.process_obs(obs, action, next_obs, hidden_state)
+        obs_z, hidden_state, loss_reduction = self.process_obs(obs, action, next_obs, hidden_state)
 
         # Predict next action and value
         phi = self.network.phi_body(obs_z)
@@ -115,7 +126,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 self.render()
         log_prob = dist.log_prob(action).unsqueeze(-1)
 
-        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_state
+        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_state, loss_reduction
 
     def render(self, mode='world_model', close=False):
         if close:
