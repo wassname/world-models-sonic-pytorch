@@ -4,6 +4,9 @@ My attempt to implement an unsupervised dynamics model with ideas from three pap
 - ["World Models"](https://arxiv.org/abs/1803.10122)
 - ["MERLIN "or "Unsupervised Predictive Memory in a Goal-Directed Agent"](https://arxiv.org/abs/1803.10760 )
 - ["Decoupling Dynamics and Reward for Transfer Learning"](https://arxiv.org/abs/1804.10689)
+- ["DARLA: Improving Zero-Shot Transfer in Reinforcement Learning"](https://arxiv.org/abs/1707.08475)
+    - dae https://arxiv.org/pdf/1511.06406.pdf
+    - dae http://dustintran.com/blog/denoising-criterion-for-variational-auto-encoding-framework
 
 - ["
 Learning and Querying Fast Generative Models for Reinforcement Learning"](https://arxiv.org/abs/1802.03006)
@@ -11,6 +14,7 @@ Learning and Querying Fast Generative Models for Reinforcement Learning"](https:
 Probing Physics Knowledge Using Tools from Developmental Psychology"](https://arxiv.org/abs/1804.01128)
 - ["
 Machine Theory of Mind"](https://arxiv.org/abs/1802.07740)
+- ["Curiosity-driven Exploration by Self-supervised Prediction"](https://arxiv.org/abs/1705.05363)
 
 ## The work is in progress
 
