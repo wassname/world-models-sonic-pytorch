@@ -32,7 +32,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                  ):
         super().__init__()
         self.world_model = world_model_fn()
-        self.z_state_dim = self.world_model.mdnrnn.z_dim + self.world_model.mdnrnn.hidden_size
+        self.z_state_dim = self.world_model.mdnrnn.z_dim + self.world_model.mdnrnn.hidden_size + self.world_model.mdnrnn.action_dim
         self.network = ActorCriticNet(self.z_state_dim, action_dim, phi_body, actor_body, critic_body)
 
         self._render = render
@@ -83,10 +83,18 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 # hidden_state.transpose(1, 0).contiguous().detach() if hidden_state is not None else None
                 hidden_state
             )
+            
+        # I want it to know what action it did last, so it could copy. So I'm going to add the one-hot action to the state
+        action_1hot = torch.eye(self.world_model.mdnrnn.action_dim)[action.long().squeeze()]
+        # if len(action_1hot.size()) == 1:
+        action_1hot = action_1hot.view(z.size(0), -1)
+        cuda = next(iter(self.parameters())).is_cuda
+        if cuda:
+            action_1hot = action_1hot.cuda()
 
         latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
-        obs = torch.cat([z, latest_hidden], -1).detach()  # Gradient block between world model and controller
-        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:])
+        obs = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
+        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach()
 
     def predict(self, obs, action=None, next_obs=None, hidden_state=None):
         # In rollout (non training mode) when no next_obs is provided

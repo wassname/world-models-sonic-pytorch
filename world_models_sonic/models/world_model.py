@@ -71,6 +71,12 @@ class WorldModel(torch.nn.modules.Module):
         self.optimizer.zero_grad()
         # self.scheduler.step()
 
+        self.last_loss_vae = loss_vae.mean().data.cpu().item()
+        self.last_loss_KLD = loss_KLD.mean().data.cpu().item()
+        self.last_loss_recon = loss_recon.mean().data.cpu().item()
+        self.last_loss_mdn = loss_mdn.mean().data.cpu().item()
+        self.last_loss_inv = loss_inv.mean().data.cpu().item()
+
         # Record
         if self.logger:
             self.logger.scalar_summary('loss_vae', loss_vae.mean())
