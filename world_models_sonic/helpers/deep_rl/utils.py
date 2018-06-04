@@ -2,6 +2,7 @@ import time
 import numpy as np
 import pickle
 import torch
+from collections import defaultdict
 
 
 def run_iterations(agent, log_dir):
@@ -11,25 +12,33 @@ def run_iterations(agent, log_dir):
     config = agent.config
     agent_name = agent.__class__.__name__
     iteration = 0
-    steps = []
-    rewards = []
-    times = []
+    history = defaultdict(list)
     t0 = time.time()
     while True:
         agent.iteration()
-        steps.append(agent.total_steps)
-        rewards += agent.last_episode_rewards.tolist()
-        times.append((time.time() - t0) / len(agent.last_episode_rewards))
+        history['steps'].append(agent.total_steps)
+        history['rewards'] += agent.last_episode_rewards.tolist()
+        history['times'].append((time.time() - t0) / len(agent.last_episode_rewards))
+        history['loss_vae'].append(agent.network.world_model.last_loss_vae)
+        history['loss_KLD'].append(agent.network.world_model.last_loss_KLD)
+        history['loss_recon'].append(agent.network.world_model.last_loss_recon)
+        history['loss_mdn'].append(agent.network.world_model.last_loss_mdn)
+        history['loss_inv'].append(agent.network.world_model.last_loss_inv)
         t0 = time.time()
         if iteration % config.iteration_log_interval == 0:
-            config.logger.info('loss_vae  %2.4f loss_KLD  %2.4f loss_recon  %2.4f loss_mdn %2.4f loss_inv  %2.4f' % (
-                agent.network.world_model.last_loss_vae,
-                agent.network.world_model.last_loss_KLD,
-                agent.network.world_model.last_loss_recon,
-                agent.network.world_model.last_loss_mdn,
-                agent.network.world_model.last_loss_inv
+            config.logger.info('loss_rnn={loss_mdn:2.4f}, loss_inv= {loss_inv2:2.4f}={lambda_finv:2.4f} * {loss_inv:2.4f}, loss_vae={loss_vae:2.4f}={lambda_vae:2.4f} * ({loss_recon:2.4f} + {lambda_vae_kld:2.4f} * {loss_KLD:2.4f})'.format(
+                # loss=loss.cpu().data.item(),
+                loss_mdn=np.mean(history['loss_mdn'][-500:]),
+                loss_recon=np.mean(history['loss_recon'][-500:]),
+                loss_KLD=np.mean(history['loss_KLD'][-500:]),
+                loss_vae=agent.network.world_model.lambda_vae *
+                (np.mean(history['loss_recon'][-500:]) + agent.network.world_model.lambda_vae_kld * np.mean(history['loss_KLD'][-500:])),
+                loss_inv=np.mean(history['loss_inv'][-500:]),
+                loss_inv2=np.mean(history['loss_inv'][-500:]) * agent.network.world_model.lambda_finv,
+                lambda_vae_kld=agent.network.world_model.lambda_vae_kld,
+                lambda_finv=agent.network.world_model.lambda_finv,
+                lambda_vae=agent.network.world_model.lambda_vae,
             ))
-
             config.logger.info('total steps %d, min/mean/max reward %2.4f/%2.4f/%2.4f of %d' % (
                 agent.total_steps,
                 np.min(agent.last_episode_rewards),
@@ -38,16 +47,16 @@ def run_iterations(agent, log_dir):
                 len(agent.last_episode_rewards)
             ))
             config.logger.info('running min/mean/max reward %2.4f/%2.4f/%2.4f of %d %2.4f s/rollout' % (
-                np.min(rewards[-500:]),
-                np.mean(rewards[-500:]),
-                np.max(rewards[-500:]),
-                len(rewards[-500:]),
-                np.mean(times[-500:]),
+                np.min(history['rewards'][-500:]),
+                np.mean(history['rewards'][-500:]),
+                np.max(history['rewards'][-500:]),
+                len(history['rewards'][-500:]),
+                np.mean(history['times'][-500:]),
             ))
         if iteration % (config.iteration_log_interval * 100) == 0:
             with open('%s/stats-%s-%s-online-stats-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name), 'wb') as f:
-                pickle.dump({'rewards': rewards,
-                             'steps': steps}, f)
+                pickle.dump({'rewards': history['rewards'],
+                             'steps': history['steps']}, f)
             agent.save('%s/%s-%s-model-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name))
             torch.save(agent.network.world_model.state_dict(), '%s/%s-%s-world_model-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name))
         iteration += 1
@@ -55,4 +64,4 @@ def run_iterations(agent, log_dir):
             agent.close()
             break
 
-    return steps, rewards
+    return history

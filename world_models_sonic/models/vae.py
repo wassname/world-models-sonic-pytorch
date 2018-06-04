@@ -54,7 +54,7 @@ class VAE5(nn.Module):
     - https://github.com/JunhongXu/world-models-pytorch/blob/master/vae.py
     """
 
-    def __init__(self, image_size=64, z_dim=32, conv_dim=64, code_dim=16, k_dim=256):
+    def __init__(self, image_size=64, z_dim=32, conv_dim=64, code_dim=16, k_dim=256, channels=3):
         """
         Args:
         - image_size (int) height and weight of image
@@ -81,7 +81,7 @@ class VAE5(nn.Module):
 
         # Encoder (increasing #filter linearly)
         layers = []
-        layers.append(ConvBlock4(3, conv_dim, kernel_size=3, padding=1))
+        layers.append(ConvBlock4(channels, conv_dim, kernel_size=3, padding=1))
 
         repeat_num = int(math.log2(image_size / code_dim))
         curr_dim = conv_dim
@@ -104,7 +104,7 @@ class VAE5(nn.Module):
             layers.append(DeconvBlock4(curr_dim, conv_dim * (i + 1), kernel_size=4, stride=2, padding=1))
             curr_dim = conv_dim * (i + 1)
 
-        layers.append(nn.Conv2d(curr_dim, 3, kernel_size=3, padding=1))
+        layers.append(nn.Conv2d(curr_dim, channels, kernel_size=3, padding=1))
         self.decoder = nn.Sequential(*layers)
 
         self.sigmoid = nn.Sigmoid()

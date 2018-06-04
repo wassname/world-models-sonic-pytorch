@@ -8,7 +8,9 @@ import time
 import skimage.color
 import torch
 import retro
+from collections import deque
 import logging
+import sys
 
 cv2.ocl.setUseOpenCL(False)
 
@@ -82,6 +84,7 @@ class WarpFrame(gym.ObservationWrapper):
 
 class StochasticFrameSkip2(gym.Wrapper):
     """Just allows us to double wrap durign testing."""
+
     def __init__(self, env, n, stickprob):
         gym.Wrapper.__init__(self, env)
         self.n = n
@@ -177,7 +180,7 @@ class RewardScaler(gym.RewardWrapper):
     drastically.
     """
 
-    def __init__(self, env, scale=0.01):
+    def __init__(self, env, scale=0.005):
         gym.RewardWrapper.__init__(self, env)
         self.scale = scale
 
@@ -209,3 +212,66 @@ class AllowBacktracking(gym.Wrapper):
         rew = max(0, self._cur_x - self._max_x)
         self._max_x = max(self._max_x, self._cur_x)
         return obs, rew, done, info
+
+
+class StochasticFrameSkip2(gym.Wrapper):
+    """Just allows us to double wrap durign testing."""
+
+    def __init__(self, env, n, stickprob):
+        gym.Wrapper.__init__(self, env)
+        self.n = n
+        self.stickprob = stickprob
+        self.curac = None
+        self.rng = np.random.RandomState()
+
+    def reset(self, **kwargs):
+        self.curac = None
+        return self.env.reset(**kwargs)
+
+    def step(self, ac):
+        done = False
+        totrew = 0
+        for i in range(self.n):
+            # First step after reset, use action
+            if self.curac is None:
+                self.curac = ac
+            # First substep, delay with probability=stickprob
+            elif i == 0:
+                if self.rng.rand() > self.stickprob:
+                    self.curac = ac
+            # Second substep, new action definitely kicks in
+            elif i == 1:
+                self.curac = ac
+            ob, rew, done, info = self.env.step(self.curac)
+            totrew += rew
+            if done:
+                break
+        return ob, totrew, done, info
+
+
+# from https://github.com/openai/baselines/blob/master/baselines/common/atari_wrappers.py
+class FrameStack(gym.Wrapper):
+    def __init__(self, env, k):
+        """Stack k last frames.
+        Returns array.
+        """
+        gym.Wrapper.__init__(self, env)
+        self.k = k
+        self.frames = deque([], maxlen=k)
+        shp = env.observation_space.shape
+        self.observation_space = spaces.Box(low=0, high=255, shape=(shp[0], shp[1], shp[2] * k), dtype=np.uint8)
+
+    def reset(self):
+        ob = self.env.reset()
+        for _ in range(self.k):
+            self.frames.append(ob)
+        return self._get_ob()
+
+    def step(self, action):
+        ob, reward, done, info = self.env.step(action)
+        self.frames.append(ob)
+        return self._get_ob(), reward, done, info
+
+    def _get_ob(self):
+        assert len(self.frames) == self.k
+        return np.concatenate(list(self.frames), -1)
