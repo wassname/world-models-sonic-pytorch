@@ -55,7 +55,7 @@ def make(game, state, discrete_actions=False, bk2dir=None, max_episode_steps=400
     return env
 
 
-def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk2dir=None, slow=False, max_episode_steps=4000):
+def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk2dir=None, slow=False, to_gray=False, max_episode_steps=4000):
     """My function to make the environment."""
     if game is not None:
         # restrict to this game
@@ -74,7 +74,7 @@ def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk
     env = wrappers.SonicDiscretizer(env)
     # env = wrappers.AllowBacktracking(env)
     env = wrappers.ScaledFloatFrame(env)
-    env = wrappers.WarpFrame(env, image_size, image_size, to_gray=False)
+    env = wrappers.WarpFrame(env, image_size, image_size, to_gray=to_gray)
     env = wrappers.StochasticFrameSkip2(env, n=4, stickprob=0)
     env = wrappers.FrameStack(env, 4)
     if slow:
