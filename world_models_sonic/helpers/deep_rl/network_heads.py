@@ -184,9 +184,11 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
 
                 # to numpy images
                 img_z = img_z.squeeze(0).transpose(0, 2)
+                img_z = img_z.view((img_z.size(0), img_z.size(1), 3, 4)).mean(-1)
                 img_z = img_z.data.cpu().numpy()
                 img_z = (img_z * 255.0).astype(np.uint8)
-                img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1)
+                img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1) #[:, :, -3:]
+                img_z_next = img_z_next.view((img_z_next.size(0), img_z_next.size(1), 3, 4)).mean(-1)
                 img_z_next = img_z_next.data.cpu().numpy()
                 img_z_next = (img_z_next * 255.0).astype(np.uint8)
 
@@ -202,7 +204,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 z_next_uint8 = cv2.resize(z_next_uint8, dsize=(self.z_shape[0] * 4, self.z_shape[1] * 4), interpolation=cv2.INTER_NEAREST)
 
                 # Display
-                img = self.img[0] * 255
+                img = self.img[0, :, :, -3:] * 255
                 self.viewer.imshow(img.astype(np.uint8))
                 self.viewer_img_z.imshow(img_z)
                 self.viewer_img_z_next.imshow(img_z_next)

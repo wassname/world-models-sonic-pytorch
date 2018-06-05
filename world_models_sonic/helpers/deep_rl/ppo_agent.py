@@ -28,10 +28,10 @@ class PPOAgent(BaseAgent):
             states, value, actions, log_probs, rewards, terminals, next_states, hidden_states = rollout[i]
             # terminals = self.network.tensor(terminals).unsqueeze(1)
             # rewards = self.network.tensor(rewards).unsqueeze(1)
-            actions = self.network.tensor(actions)
-            states = self.network.tensor(states)
-            next_states = self.network.tensor(next_states)
-            hidden_states = self.network.tensor(hidden_states)
+            # actions = self.network.tensor(actions)
+            # states = self.network.tensor(states)
+            # next_states = self.network.tensor(next_states)
+            # hidden_states = self.network.tensor(hidden_states)
 
             next_value = rollout[i + 1][1]
             returns = rewards + config.discount * terminals * returns
@@ -41,7 +41,6 @@ class PPOAgent(BaseAgent):
                 td_error = rewards + config.discount * terminals * next_value.detach() - value.detach()
                 advantages = advantages * config.gae_tau * config.discount * terminals + td_error
 
-            # inds = zip([i] * len(rewards), range(len(rewards)))
             inds = zip([i] * len(rewards), range(len(rewards)))
             inds = self.network.tensor(list(inds)).long()
             processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states, inds]
@@ -91,6 +90,7 @@ class PPOAgent(BaseAgent):
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = self.process_rollout(rollout, pending_value)
         batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
         extrinsic = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+        # initial_loss = torch.zeros(states.size(0))
         batcher.shuffle()
         while not batcher.end():
             batch_indices = batcher.next_batch()[0]
@@ -106,9 +106,9 @@ class PPOAgent(BaseAgent):
             # Update reward in the rollout, using reducing in loss: curiosity
             for k, (i, j) in enumerate(inds[batch_indices]):
                 if config.curiosity_only:
-                    rollout[i][4][j] = loss_reduction[k] * config.curiosity_weight
+                    rollout[i][4][j] = (loss_reduction[k] - config.curiosity_baseline) * config.curiosity_weight
                 else:
-                    rollout[i][4][j] += loss_reduction[k] * config.curiosity_weight
+                    rollout[i][4][j] += (loss_reduction[k] - config.curiosity_baseline) * config.curiosity_weight
 
         # Log
         extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
