@@ -37,7 +37,6 @@ class WorldModel(torch.nn.modules.Module):
 
         loss_recon, loss_KLD = self.vae.loss(Y, X, mu_vae, logvar)
 
-
         # MDNRNN Forward
         z_obs = self.vae.sample(mu_vae, logvar)
         z_obs = z_obs.view(batch_size, seq_len, -1)

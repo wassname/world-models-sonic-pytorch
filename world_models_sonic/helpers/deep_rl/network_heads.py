@@ -54,65 +54,68 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 hidden_states = torch.cat([padding, hidden_states], dim=1)
         return hidden_states
 
-    def process_obs(self, obs, action=None, next_obs=None, hidden_state=None, model_train=True):
+    def process_obs(self, obs, action=None, next_obs=None, hidden_state=None):
         """Convert observation to latent space using world model."""
         self.img = obs
-        is_rollout = next_obs is None
         batch_size = obs.shape[0]
 
         obs = self.tensor(obs).transpose(1, 3).contiguous()
         hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
+        if action is None:
+            # FIXME when we don't get an action (e.g. rollout) just use null action to make prediction
+            action = torch.zeros(batch_size, 1)
+        else:
+            action = action.view(batch_size, 1)
 
         # Input is (batch, height, width, channels)
-        if is_rollout or (not model_train):
-            with torch.no_grad():
-                # when we don't get an action (e.g. rollout) just use null action to make prediction
-                action = torch.zeros(batch_size, 1)
-                z_next, z, hidden_state = self.world_model.forward(
-                    obs.detach(),
-                    action.detach(),
-                    hidden_state=hidden_state
-                )
-                self.z = z.data
-                self.z_next = z_next.data
-                loss_reduction = None
-        else:
-            next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
-            _, _, _, info_world_model_before = self.world_model.forward_train(
+        with torch.no_grad():
+            z_next, z, hidden_state = self.world_model.forward(
                 obs.detach(),
                 action.detach(),
-                next_obs.detach(),
-                hidden_state
+                hidden_state=hidden_state
             )
-
-            # Do it again with no backprop to see how much we learned
-            with torch.no_grad():
-                z_next, z, hidden_state, info_world_model_after = self.world_model.forward_train(
-                    obs.detach(),
-                    action.detach(),
-                    next_obs.detach(),
-                    hidden_state,
-                    test=True
-                )
-
-            loss_reduction = (info_world_model_before['loss'] - info_world_model_after['loss']).detach()
+            self.z = z.data
+            self.z_next = z_next.data
 
         # I want it to know what action it did last, so it could copy. So I'm going to add the one-hot action to the state
         action_1hot = torch.eye(self.world_model.mdnrnn.action_dim)[action.long().squeeze()]
-        action_1hot = action_1hot.view(z.size(0), -1)
+        action_1hot = action_1hot.view(batch_size, -1)
         cuda = next(iter(self.parameters())).is_cuda
         if cuda:
             action_1hot = action_1hot.cuda()
 
         latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
         obs = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
-        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach(), loss_reduction
+        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach()
 
-    def predict(self, obs, action=None, next_obs=None, hidden_state=None, model_train=True):
+    def train_world_model(self, obs, action=None, next_obs=None, hidden_state=None, train=True):
+        obs = self.tensor(obs).transpose(1, 3).contiguous()
+        hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
+
+        next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
+        if train:
+            z_next, z, hidden_state, info = self.world_model.forward_train(
+                obs.detach(),
+                action.detach(),
+                next_obs.detach(),
+                hidden_state
+            )
+        else:
+            with torch.no_grad():
+                z_next, z, hidden_state, info = self.world_model.forward_train(
+                    obs.detach(),
+                    action.detach(),
+                    next_obs.detach(),
+                    hidden_state,
+                    test=True
+                )
+        return info['loss'].detach()
+
+    def predict(self, obs, action=None, next_obs=None, hidden_state=None):
         # In rollout (non training mode) when no next_obs is provided
         is_rollout = next_obs is None
 
-        obs_z, hidden_state, loss_reduction = self.process_obs(obs, action, next_obs, hidden_state, model_train=model_train)
+        obs_z, hidden_state = self.process_obs(obs, action, next_obs, hidden_state)
 
         # Predict next action and value
         phi = self.network.phi_body(obs_z)
@@ -127,7 +130,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 self.render()
         log_prob = dist.log_prob(action).unsqueeze(-1)
 
-        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_state, loss_reduction
+        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_state
 
     def render(self, mode='world_model', close=False):
         if close:
