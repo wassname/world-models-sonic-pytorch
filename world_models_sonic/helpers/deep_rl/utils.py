@@ -8,17 +8,17 @@ from collections import defaultdict
 def run_iterations(agent, log_dir):
     # From https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/utils/misc.py#L51
     # Modified to save if a differen't location
-    # TODO add tqdm
     config = agent.config
     agent_name = agent.__class__.__name__
     iteration = 0
     history = defaultdict(list)
     t0 = time.time()
     while True:
+        steps0 = agent.total_steps
         agent.iteration()
-        history['steps'].append(agent.total_steps)
+        history['steps'].append(agent.total_steps -steps0)
         history['rewards'] += agent.last_episode_rewards.tolist()
-        history['times'].append((time.time() - t0) / len(agent.last_episode_rewards))
+        history['times'].append(history['steps'][-1]/(time.time() - t0) )
         history['loss_vae'].append(agent.network.world_model.last_loss_vae)
         history['loss_KLD'].append(agent.network.world_model.last_loss_KLD)
         history['loss_recon'].append(agent.network.world_model.last_loss_recon)
@@ -46,7 +46,7 @@ def run_iterations(agent, log_dir):
                 np.max(agent.last_episode_rewards),
                 len(agent.last_episode_rewards)
             ))
-            config.logger.info('running min/mean/max reward %2.4f/%2.4f/%2.4f of %d %2.4f s/rollout' % (
+            config.logger.info('running min/mean/max reward %2.4f/%2.4f/%2.4f of %d %2.4f step/s' % (
                 np.min(history['rewards'][-500:]),
                 np.mean(history['rewards'][-500:]),
                 np.max(history['rewards'][-500:]),

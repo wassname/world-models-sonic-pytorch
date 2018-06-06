@@ -19,7 +19,13 @@ class WorldModel(torch.nn.modules.Module):
         self.lambda_loss = lambda_loss
         self.logger = logger
 
-    def forward(self, x, action=None, hidden_state=None, X_next=None):
+        self.last_loss_vae = 0
+        self.last_loss_KLD = 0
+        self.last_loss_recon = 0
+        self.last_loss_mdn = 0
+        self.last_loss_inv = 0
+
+    def forward(self, x, action=None, hidden_state=None):
         _, mu_vae, logvar_vae = self.vae.forward(x)
         z = self.vae.sample(mu_vae, logvar_vae)
         pi, mu, sigma, hidden_state = self.mdnrnn.forward(z[:, None], action, hidden_state=hidden_state)
@@ -27,7 +33,7 @@ class WorldModel(torch.nn.modules.Module):
         return z_next_pred.squeeze(1), z, hidden_state
 
     def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
-        seq_len = 1
+        seq_len = 1  # FIXME it will likely learn better if I give it actual sequences
         batch_size = X.size(0)
         cuda = next(iter(self.parameters())).is_cuda
 

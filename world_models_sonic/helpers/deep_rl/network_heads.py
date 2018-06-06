@@ -91,8 +91,8 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
     def train_world_model(self, obs, action=None, next_obs=None, hidden_state=None, train=True):
         obs = self.tensor(obs).transpose(1, 3).contiguous()
         hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
-
         next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
+
         if train:
             z_next, z, hidden_state, info = self.world_model.forward_train(
                 obs.detach(),

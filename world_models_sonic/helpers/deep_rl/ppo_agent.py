@@ -78,55 +78,56 @@ class PPOAgent(BaseAgent):
         _, _, _, pending_value, _ = self.network.predict(states)
         rollout.append([states, pending_value, None, None, None, None, None])
 
-        # Train world model here and update values with curiosity reward, before we calculate advantages
-        # For an intro to the idea see :https://arxiv.org/abs/1705.05363 . But my approach is to make the reward
-        # the reduction of loss from a state, similar to mentioned here http://people.idsia.ch/~juergen/creativity.html
-        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = self.process_rollout(rollout, pending_value)
-        batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
-        extrinsic = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
-        instrinsic = self.network.tensor(np.zeros(states.size(0)))
+        if config.train_world_model:
+            # Train world model here and update values with curiosity reward, before we calculate advantages
+            # For an intro to the idea see :https://arxiv.org/abs/1705.05363 . But my approach is to make the reward
+            # the reduction of loss from a state, similar to mentioned here http://people.idsia.ch/~juergen/creativity.html
+            states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = self.process_rollout(rollout, pending_value)
+            batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
+            extrinsic = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+            instrinsic = self.network.tensor(np.zeros(states.size(0)))
 
-        # I tried learning from the whole rollout then comparing how much I had learned, but it prefered to stand there until it had learnt all it could
-        batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
-        while not batcher.end():
-            batch_indices = batcher.next_batch()[0]
-            batch_indices = self.network.tensor(batch_indices).long()
+            # I tried learning from the whole rollout then comparing how much I had learned, but it prefered to stand there until it had learnt all it could
+            while not batcher.end():
+                batch_indices = batcher.next_batch()[0]
+                batch_indices = self.network.tensor(batch_indices).long()
 
-            sampled_states = states[batch_indices]
-            sampled_actions = actions[batch_indices]
-            sampled_next_states = next_states[batch_indices]
-            sampled_hidden_states = hidden_states[batch_indices]
+                sampled_states = states[batch_indices]
+                sampled_actions = actions[batch_indices]
+                sampled_next_states = next_states[batch_indices]
+                sampled_hidden_states = hidden_states[batch_indices]
 
-            initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
-            loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
-            intrinsic_rewards = initial_loss - loss
+                initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+                if config.curiosity:
+                    loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+                    intrinsic_rewards = initial_loss - loss
 
-            # Update reward in the rollout, using reducing in loss: curiosity
-            for k, (i, j) in enumerate(inds[batch_indices]):
-                intrinsic_reward = (config.intrinsic_reward_normalizer(intrinsic_rewards[k].item()) - config.curiosity_boredom) * config.curiosity_weight
-                instrinsic[batch_indices[k]] = intrinsic_reward
-                intrinsic_reward = self.network.tensor(intrinsic_reward)
-                if config.curiosity_only:
-                    rollout[i][4][j] = intrinsic_reward
-                else:
-                    rollout[i][4][j] += intrinsic_reward
+                    # Update reward in the rollout, using reducing in loss: curiosity
+                    for k, (i, j) in enumerate(inds[batch_indices]):
+                        intrinsic_reward = (config.intrinsic_reward_normalizer(intrinsic_rewards[k].item()) - config.curiosity_boredom) * config.curiosity_weight
+                        instrinsic[batch_indices[k]] = intrinsic_reward
+                        intrinsic_reward = self.network.tensor(intrinsic_reward)
+                        if config.curiosity_only:
+                            rollout[i][4][j] = intrinsic_reward
+                        else:
+                            rollout[i][4][j] += intrinsic_reward
 
-        # Log
-        # extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
-        # if config.curiosity_only:
-        #     instrinsic = extrinsic_after
-        # else:
-        #     instrinsic = extrinsic_after - extrinsic
-        config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
-        config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
-        print('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
-            extrinsic.min().cpu().item(),
-            extrinsic.mean().cpu().item(),
-            extrinsic.max().cpu().item(),
-            instrinsic.min().cpu().item(),
-            instrinsic.mean().cpu().item(),
-            instrinsic.max().cpu().item()
-        ))
+            # Log
+            # extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+            # if config.curiosity_only:
+            #     instrinsic = extrinsic_after
+            # else:
+            #     instrinsic = extrinsic_after - extrinsic
+            config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
+            config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
+            print('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
+                extrinsic.min().cpu().item(),
+                extrinsic.mean().cpu().item(),
+                extrinsic.max().cpu().item(),
+                instrinsic.min().cpu().item(),
+                instrinsic.mean().cpu().item(),
+                instrinsic.max().cpu().item()
+            ))
 
         # Calculate advantages again now that we have changed the rewards
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
