@@ -75,7 +75,7 @@ def make_sonic(game=None, state=None, image_size=128, discrete_actions=False, bk
     env = wrappers.AllowBacktracking(env)
     env = wrappers.ScaledFloatFrame(env)
     env = wrappers.WarpFrame(env, image_size, image_size, to_gray=to_gray)
-    env = wrappers.StochasticFrameSkip2(env, n=4, stickprob=0)
+    env = wrappers.StochasticFrameSkip2(env, n=2, stickprob=0)
     env = wrappers.FrameStack(env, 4)
     if slow:
         env = wrappers.SlowFrames(env)

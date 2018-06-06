@@ -120,7 +120,7 @@ class VAE5(nn.Module):
         """Returns mean and log variance, which describe the distributions of Z"""
         x = self.encoder(x)
         x = x.view(x.size()[0], -1)
-        return self.mu(x), self.logvar(x).clamp(np.log(eps),-np.log(eps))
+        return self.mu(x), self.logvar(x).clamp(np.log(eps), -np.log(eps))
 
     def decode(self, z):
         """Reconstruct image X using z sampled from Z."""
@@ -161,26 +161,3 @@ def loss_function_vae(recon_x, x, mu, logvar):
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     loss_KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), 1)
     return loss_recon, loss_KLD
-
-
-if __name__ == '__main__':
-    import numpy as np
-    from matplotlib import pyplot as plt
-
-    img = np.random.randn(64, 64, 3)
-    gpu_img = Variable(torch.from_numpy(img[np.newaxis].transpose(0, 3, 1, 2))).float().cuda()
-
-    vae = VAE()
-    vae.cuda()
-    x, mu, logvar = vae.forward(gpu_img)
-    print(x.size())
-    print(loss_function(x, gpu_img, mu, logvar))
-    x = x.data.cpu().numpy()[0].transpose(1, 2, 0)
-
-    plt.imshow(img)
-    plt.title('original')
-    plt.show()
-
-    plt.imshow(x)
-    plt.title('reconstructed')
-    plt.show()

@@ -1,7 +1,6 @@
 import time
 import numpy as np
 import pickle
-import torch
 from collections import defaultdict
 
 
@@ -16,9 +15,9 @@ def run_iterations(agent, log_dir):
     while True:
         steps0 = agent.total_steps
         agent.iteration()
-        history['steps'].append(agent.total_steps -steps0)
+        history['steps'].append(agent.total_steps - steps0)
         history['rewards'] += agent.last_episode_rewards.tolist()
-        history['times'].append(history['steps'][-1]/(time.time() - t0) )
+        history['times'].append(history['steps'][-1] / (time.time() - t0))
         history['loss_vae'].append(agent.network.world_model.last_loss_vae)
         history['loss_KLD'].append(agent.network.world_model.last_loss_KLD)
         history['loss_recon'].append(agent.network.world_model.last_loss_recon)

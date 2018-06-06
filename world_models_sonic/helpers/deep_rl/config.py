@@ -3,7 +3,7 @@ from deep_rl.utils.normalizer import RescaleNormalizer
 
 
 class Config(_Config):
-    """Modified from https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/utils/config.py."""
+    """Add extra defaults to https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/utils/config.py."""
 
     def __init__(self):
         super().__init__()
@@ -13,5 +13,5 @@ class Config(_Config):
         self.curiosity = False
         self.intrinsic_reward_normalizer = RescaleNormalizer()
         self.curiosity_only = False
-        self.curiosity_weight = 0.1
+        self.curiosity_weight = 1
         self.curiosity_boredom = 0

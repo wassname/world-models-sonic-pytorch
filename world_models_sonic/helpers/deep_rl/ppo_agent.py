@@ -95,20 +95,24 @@ class PPOAgent(BaseAgent):
                 sampled_next_states = next_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                z_next, z, hidden_state, initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+                _, _, _, initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
                 if config.curiosity:
                     # Train world model here and update values with curiosity reward, before we calculate advantages
                     # For an intro to the idea see :https://arxiv.org/abs/1705.05363 . But my approach is to make the reward
                     # the reduction of loss from a state, similar to mentioned here http://people.idsia.ch/~juergen/creativity.html
-                    z_next, z, hidden_state, loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+                    _, _, _, loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+                    loss = loss.view((config.world_model_batch_size, -1))
+                    initial_loss = initial_loss.view((config.world_model_batch_size, -1))
                     intrinsic_rewards = initial_loss - loss
 
-                    for k in batch_indices:
-                        intrinsic_reward = (config.intrinsic_reward_normalizer(intrinsic_rewards[k].item()) - config.curiosity_boredom) * config.curiosity_weight
-                        if config.curiosity_only:
-                            rollout[k][4] = intrinsic_reward
-                        else:
-                            rollout[k][4] += intrinsic_reward
+                    for i, k in enumerate(batch_indices):
+                        intrinsic_reward = (config.intrinsic_reward_normalizer(intrinsic_rewards[i]) - config.curiosity_boredom) * config.curiosity_weight
+                        intrinsic_reward = self.network.tensor(intrinsic_reward)
+                        for j in range(len(intrinsic_reward)):
+                            if config.curiosity_only:
+                                rollout[j][4][k] = intrinsic_reward[j]
+                            else:
+                                rollout[j][4][k] += intrinsic_reward[j]
 
                         # rollout[k][-1] = hidden_state.detach()
                         # TODO also update hidden state, action, prediction. Or would I need to update the predicted action too?
