@@ -3,13 +3,8 @@ gym==0.10.5
 pytorch==0.4.0
 opencv-python==3.3.0.10
 toolz==0.9.0
-h5py==2.7.0
-zarr==2.2.0
-dask[array]=0.17.2
-keyboard==0.13.2
 -e git+https://github.com/ShangtongZhang/DeepRL.git@7066fb8e89e9b7e2f029349cdf3fc1d225c0f933#egg=deep_rl
 gym-retro==0.5.4
 git+https://github.com/openai/retro-contest.git@476a790f66f5bc8fde068a77c477aa1531efb8b1#egg=retro-contest_support\&subdirectory=support
-docker
 pyyaml
 requests
