@@ -1,96 +1,31 @@
-# world-models-pytorch
+# world-models-sonic-pytorch
 
-My attempt to implement an unsupervised dynamics model with ideas from three papers
+My attempt to implement an unsupervised dynamics model with ideas from a few papers
 - ["World Models"](https://arxiv.org/abs/1803.10122)
 - ["MERLIN "or "Unsupervised Predictive Memory in a Goal-Directed Agent"](https://arxiv.org/abs/1803.10760 )
 - ["Decoupling Dynamics and Reward for Transfer Learning"](https://arxiv.org/abs/1804.10689)
-- ["DARLA: Improving Zero-Shot Transfer in Reinforcement Learning"](https://arxiv.org/abs/1707.08475)
-    - dae https://arxiv.org/pdf/1511.06406.pdf
-    - dae http://dustintran.com/blog/denoising-criterion-for-variational-auto-encoding-framework
-
-- ["
-Learning and Querying Fast Generative Models for Reinforcement Learning"](https://arxiv.org/abs/1802.03006)
-- ["
-Probing Physics Knowledge Using Tools from Developmental Psychology"](https://arxiv.org/abs/1804.01128)
-- ["
-Machine Theory of Mind"](https://arxiv.org/abs/1802.07740)
 - ["Curiosity-driven Exploration by Self-supervised Prediction"](https://arxiv.org/abs/1705.05363)
 
-## The work is in progress
+I use a dynamics model, an inverse model, and a VAE. For the controller I use Proximal Policy Optimization (PPO).
+
+I also use Curiosity as a auxillary reward. The theory is that we like to see/listen to things that we can learn from, but then we don't want to see them again because we've learnt all we could. There's more about [that theory here](http://people.idsia.ch/~juergen/creativity.html).
+
+One way to frame this in reinforcement learning is by rewarding a controller for finding novel states and giving them to the world model. Then we measuring how much the loss reduces before and after training. That's out reward (There are probably better ways to frame it).
+
+So I tried that... but the agent liked to stand in place and fill a whole rollout with one frame. Until it had learnt all it could. Then it would casually stroll a little way, and overfit to it's new environment.
+
+The end result was a score of ~2400/9000 and place ~#200 on the leaderboard to the [openai retro competition](https://contest.openai.com/).
+
+![](docs/img/visualization.gif)
+
+## Sources of code
 
 - implementations, which I got code and ideas from
     - https://github.com/AppliedDataSciencePartners/WorldModels
     - https://github.com/JunhongXu/world-models-pytorch
     - https://github.com/goolulusaurs/WorldModels
+    - https://github.com/ShangtongZhang/DeepRL
     - https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
-
-# Competition links
-
-links:
-- https://discordapp.com/channels/427882398005329921/
-
-# Plans
-
-TODOs
-
-- [x] Implement MDN-RNN
-- [x] Implement VAE
-- [x] Training for VAE
-    - [x] Random rollouts to create a dataset
-    - [x] Training function
-- [x] Training for MDN-RNN
-
-- [x] maybe use full size frames?
-- [x] skip connections? hard to do in VAE's, but I used inception bocks
-- [x] dropout, batchnorm, leakyrelu. Inception blocks.
-    - [x] dropout hurt performanc and seems to absent from most VAE code
-- [x] try smoothl1? doesn't seem to help although this might be the KLD reconstructon loss balance. Plus it's that same as L2 when loss>1.
-
-- [x] make a module containing all 3 including inverse model from https://arxiv.org/abs/1804.10689
-    - that way they can use the same optimizer
-- [x] make inverse model `a = F(z', z)` should be an RNN with latent_dim* 2 in and action_dim out. So similar to the forward
-    - [x] should it be statistical, a mdn?
-    with
-        latent d = 256. Both the LSTM-D and LSTM-R have a hidden
-        layer with 128 units each. The Inverse model,finv, consists
-        of a linear layer of size 64 with ReLU non-linearity followed
-        by an output layer of size 4 with the softmax activation
-        defining a probability over actions. T
-- [x] do triple training
-    - [x] work out loss weights
-- [x] make sure the rnn loss should be -ve
-- [x] make sure rnn loss is using all parts of the sequence
-- [x] optimize seq len vs batch of rnn - not enougth gpu ram
-- [x] maybe do skip frames - it's already doing 4
-- [x] Implement a controller, which uses the dynamics model in the value network (like in MERLIN)
-
-- [ ] latent vims in VAE
-    - [x] try 1024z
-    - [x] try 512z
-    - [x] try 256z - nope
-    - [x] try 128z - nope
-
-- [ ] make video of ppo training
-    - [ ] save bk2?
-    - [ ] matplotlib
-    - [ ] save pngs
-    - [ ] moviepy https://stackoverflow.com/questions/36401912/is-it-possible-to-generate-a-gif-animation-using-pillow-library-only
-- [ ] make video of ppo training with world model decodings
-- [ ] make slides
-
-
-- [ ] discrete actions
-    - [x] code
-    - [x] gather data
-    - [ ] train world model
-    - [ ] train ppo
-
-- [ ] why is pytorch running out of ram the second time I run a closed function?
-    - [x] cuda free mem doesn't help
-    - [ ] what about pin memory?
-    - [x] summary after wards helps with 200mb
-
-- [ ] get deep_rl working on ami deep learning. Probobly just need to forward -X of install fake screen
 
 
 ## Setup
@@ -99,7 +34,6 @@ TODOs
     - [openai/retro](https://github.com/openai/retro)
     - [openai/gym_remote (from retro-contest)](https://github.com/openai/retro-contest)
     - [openai/retro-baselines](https://github.com/openai/retro-baselines/blob/master/agents/ppo2.docker)
-
 
 - roms: you need the ROM files for the Sonic games
     - install from steam
@@ -116,15 +50,13 @@ TODOs
 
 I have included the pretrained models in releases
 
-- 01_gather_dynamics training_data.py
-- 02_train_dynamics model.ipynb
-- 03_train_controller.ipynb
+- `04_train_PPO_v4-all-curiosity.ipynb` to train from scratch. Run if with verbose=True to see the performance.
 
 ## Hyperparameters
 
 ### Loss weights
 
-`02_train_dynamics model.ipynb` uses joint training for the VAE, forward, and inverse models (https://arxiv.org/abs/1803.10122). This introduces a few new hyperperameters, but at of 20180520 there is no information on how to set these. The parameters are lambda_vae and lambda_finv.
+The model uses joint training for the VAE, forward, and inverse models (https://arxiv.org/abs/1803.10122). This introduces a few new hyperperameters, but at of 20180520 there is no information on how to set these. The parameters are lambda_vae and lambda_finv.
 
 We want changes to be within an order of magnitude, and we preffer loss VAE to be optimised preferentially, then mdnrnn, then finv. So we want to set it so that loss_vae is large.
 
@@ -137,3 +69,7 @@ To set them, you should run for a few epochs with them set to 1, then record the
 Other hyperparamers can sometimes needs to be tweaked. A small learning rate may be needed to initially train the VAE, say 1e-5. Then a higher one may be needed to get the MDRNN to convert, say 3e-4.
 
 Overall it can take quite a small learning rate to train multiple network simulataneusly without being to high on any of them.
+
+### Curiosity weights
+
+I haven't found optimal setting for these but you can leave the settings at default values.
