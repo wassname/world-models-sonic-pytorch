@@ -89,9 +89,11 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach()
 
     def train_world_model(self, obs, action=None, next_obs=None, hidden_state=None, train=True):
-        obs = self.tensor(obs).transpose(1, 3).contiguous()
-        hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
-        next_obs = self.tensor(next_obs).transpose(1, 3).contiguous()
+        obs = self.tensor(obs).transpose(2, 4).contiguous()
+        next_obs = self.tensor(next_obs).transpose(2, 4).contiguous()
+
+        # Only pass in the first hidden state. Expects [(1, batch, z_dim)]*2
+        hidden_state = [h[None, :] for h in hidden_state[:, 0].transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
 
         if train:
             z_next, z, hidden_state, info = self.world_model.forward_train(
@@ -109,7 +111,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                     hidden_state,
                     test=True
                 )
-        return info['loss'].detach()
+        return z_next.detach(), z.detach(), self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach(), info['loss'].detach()
 
     def predict(self, obs, action=None, next_obs=None, hidden_state=None):
         # In rollout (non training mode) when no next_obs is provided

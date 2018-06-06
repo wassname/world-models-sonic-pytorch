@@ -33,20 +33,22 @@ class WorldModel(torch.nn.modules.Module):
         return z_next_pred.squeeze(1), z, hidden_state
 
     def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
-        seq_len = 1  # FIXME it will likely learn better if I give it actual sequences
         batch_size = X.size(0)
+        seq_len = X.size(1)
         cuda = next(iter(self.parameters())).is_cuda
 
         # VAE forward
-        Y, mu_vae, logvar = self.vae.forward(X)
-        Y_next, mu_vae_next, logvar_next = self.vae.forward(X_next)
+        X_flat = X.view((batch_size * seq_len, *X.size()[2:]))
+        X_next_flat = X_next.view((batch_size * seq_len, *X.size()[2:]))
+        Y, mu_vae, logvar = self.vae.forward(X_flat)
+        Y_next, mu_vae_next, logvar_next = self.vae.forward(X_next_flat)
 
-        loss_recon, loss_KLD = self.vae.loss(Y, X, mu_vae, logvar)
+        loss_recon, loss_KLD = self.vae.loss(Y, X_flat, mu_vae, logvar)
 
         # MDNRNN Forward
         z_obs = self.vae.sample(mu_vae, logvar)
         z_obs = z_obs.view(batch_size, seq_len, -1)
-        z_obs_next = self.vae.sample(mu_vae_next, logvar_next).detach()  # The RNN can't change the future
+        z_obs_next = self.vae.sample(mu_vae_next, logvar_next)  # .detach()  # The RNN can't change the future?
         z_obs_next = z_obs_next.view(batch_size, seq_len, -1)
         actions = actions.view(batch_size, seq_len).float()
         if cuda:
@@ -58,13 +60,13 @@ class WorldModel(torch.nn.modules.Module):
         # We are evaluating how the output distribution for the next step
         # matches the real next step. So we have to discard the last step in the
         # sequence which has no next step.
-        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, pi, mu, sigma).sum(1)
+        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, pi, mu, sigma).view((-1))
 
         # Finv forward
         z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
         action_pred = self.finv(z_obs, z_next_pred).float()
         actions_hot = torch.eye(self.mdnrnn.action_dim)[actions.long()].cuda()
-        loss_inv = F.binary_cross_entropy_with_logits(action_pred, actions_hot, reduce=False).sum(2).sum(1)
+        loss_inv = F.binary_cross_entropy_with_logits(action_pred, actions_hot, reduce=False).sum(2).view((-1))
 
         # To reduce the need for hyperparameters which balance the losses we will
         # normalise for number of pixels, action_dim, z_dim etc
