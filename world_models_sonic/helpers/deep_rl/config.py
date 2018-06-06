@@ -6,7 +6,7 @@ class Config(_Config):
     """Modified from https://github.com/ShangtongZhang/DeepRL/blob/master/deep_rl/utils/config.py."""
 
     def __init__(self):
-        super().__init__(self)
+        super().__init__()
         self.train_world_model = True
         self.world_model_batch_size = 1
 
