@@ -1,3 +1,9 @@
+#######################################################################
+# Copyright (C) 2017 Shangtong Zhang(zhangshangtong.cpp@gmail.com)    #
+# Permission given to modify the code as long as you keep this        #
+# declaration at the top                                              #
+#######################################################################
+
 import torch
 from torch import nn
 import numpy as np
@@ -56,7 +62,7 @@ class PPOAgent(BaseAgent):
                 actions, log_probs, _, values, hidden_states = self.network.predict(states, hidden_state=hidden_states)
             next_states, rewards, terminals, _ = self.task.step(actions.cpu().detach().numpy())
             self.episode_rewards += rewards
-            rewards = config.reward_normalizer(rewards)
+            rewards = config.reward_normalizer(rewards[:, None])[:, 0]
             for i, terminal in enumerate(terminals):
                 if terminals[i]:
                     self.last_episode_rewards[i] = self.episode_rewards[i]
@@ -105,21 +111,20 @@ class PPOAgent(BaseAgent):
                     initial_loss = initial_loss.view((config.world_model_batch_size, -1))
                     intrinsic_rewards = initial_loss - loss
 
+                    # Update reward
                     for i, k in enumerate(batch_indices):
-                        intrinsic_reward = (config.intrinsic_reward_normalizer(intrinsic_rewards[i]) - config.curiosity_boredom) * config.curiosity_weight
+                        intrinsic_reward = config.intrinsic_reward_normalizer(intrinsic_rewards[i].cpu().numpy()[:, None])[:, 0]
+                        intrinsic_reward = (intrinsic_reward - config.curiosity_boredom) * config.curiosity_weight
                         intrinsic_reward = self.network.tensor(intrinsic_reward)
                         for j in range(len(intrinsic_reward)):
                             if config.curiosity_only:
-                                rollout[j][4][k] = intrinsic_reward[j]
+                                rollout[j][4][k] = intrinsic_reward[j].detach()
                             else:
-                                rollout[j][4][k] += intrinsic_reward[j]
-
-                        # rollout[k][-1] = hidden_state.detach()
-                        # TODO also update hidden state, action, prediction. Or would I need to update the predicted action too?
+                                rollout[j][4][k] += intrinsic_reward[j].detach()
 
             # Log
             if config.curiosity:
-                extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+                extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]])
                 if config.curiosity_only:
                     instrinsic = extrinsic_after
                 else:
@@ -127,14 +132,15 @@ class PPOAgent(BaseAgent):
 
                 config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
                 config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
-                print('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
-                    extrinsic.min().cpu().item(),
-                    extrinsic.mean().cpu().item(),
-                    extrinsic.max().cpu().item(),
-                    instrinsic.min().cpu().item(),
-                    instrinsic.mean().cpu().item(),
-                    instrinsic.max().cpu().item()
-                ))
+                # print('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
+                #     extrinsic.min().cpu().item(),
+                #     extrinsic.mean().cpu().item(),
+                #     extrinsic.max().cpu().item(),
+                #     instrinsic.min().cpu().item(),
+                #     instrinsic.mean().cpu().item(),
+                #     instrinsic.max().cpu().item()
+                # ))
+        del states, value, actions, log_probs, rewards, terminals, next_states, hidden_states, extrinsic, instrinsic, intrinsic_reward, intrinsic_rewards
 
         # Calculate advantages again now that we have changed the rewards
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
