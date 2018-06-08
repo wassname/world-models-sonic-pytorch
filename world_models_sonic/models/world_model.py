@@ -25,12 +25,12 @@ class WorldModel(torch.nn.modules.Module):
         self.last_loss_mdn = 0
         self.last_loss_inv = 0
 
-    def forward(self, x, action=None, hidden_state=None):
-        _, mu_vae, logvar_vae = self.vae.forward(x)
-        z = self.vae.sample(mu_vae, logvar_vae)
-        pi, mu, sigma, hidden_state = self.mdnrnn.forward(z[:, None], action, hidden_state=hidden_state)
-        z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
-        return z_next_pred.squeeze(1), z, hidden_state
+    # def forward(self, x, action=None, hidden_state=None):
+    #     _, mu_vae, logvar_vae = self.vae.forward(x)
+    #     z = self.vae.sample(mu_vae, logvar_vae)
+    #     pi, mu, sigma, hidden_state = self.mdnrnn.forward(z[:, None], action, hidden_state=hidden_state)
+    #     z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
+    #     return z_next_pred.squeeze(1), z, hidden_state
 
     def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
         batch_size = X.size(0)

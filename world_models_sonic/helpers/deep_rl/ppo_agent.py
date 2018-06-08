@@ -24,6 +24,7 @@ class PPOAgent(BaseAgent):
         self.last_episode_rewards = np.zeros(config.num_workers)
         self.states = self.task.reset()
         self.states = config.state_normalizer(self.states)
+        self.hidden_states = None
 
     def process_rollout(self, rollout, pending_value):
         config = self.config
@@ -55,11 +56,11 @@ class PPOAgent(BaseAgent):
         config = self.config
         rollout = []
         states = self.states
-        hidden_states = None
+        hidden_states = self.hidden_states
 
         for _ in range(config.rollout_length):
             with torch.no_grad():
-                actions, log_probs, _, values, hidden_states = self.network.predict(states, hidden_state=hidden_states)
+                actions, log_probs, _, values, hidden_states = self.network.predict(states, hidden_states=hidden_states)
             next_states, rewards, terminals, _ = self.task.step(actions.cpu().detach().numpy())
             self.episode_rewards += rewards
             rewards = config.reward_normalizer(rewards[:, None])[:, 0]
@@ -80,9 +81,10 @@ class PPOAgent(BaseAgent):
             ])
             states = next_states
 
+        _, _, _, pending_value, hidden_states = self.network.predict(states, hidden_states=hidden_states)
+        rollout.append([states, pending_value, None, None, None, None, hidden_states])
         self.states = states
-        _, _, _, pending_value, _ = self.network.predict(states)
-        rollout.append([states, pending_value, None, None, None, None, None])
+        self.hidden_states = hidden_states.detach()
 
         if config.train_world_model:
 
@@ -140,7 +142,7 @@ class PPOAgent(BaseAgent):
                 #     instrinsic.mean().cpu().item(),
                 #     instrinsic.max().cpu().item()
                 # ))
-        del states, value, actions, log_probs, rewards, terminals, next_states, hidden_states, extrinsic, instrinsic, intrinsic_reward, intrinsic_rewards
+        del states, value, actions, log_probs, rewards, terminals, next_states, extrinsic, instrinsic, intrinsic_reward, intrinsic_rewards
 
         # Calculate advantages again now that we have changed the rewards
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
@@ -160,7 +162,7 @@ class PPOAgent(BaseAgent):
                 sampled_next_states = next_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                _, log_probs, entropy_loss, values, hidden_state = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
+                _, log_probs, entropy_loss, values, _ = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
                 ratio = (log_probs - sampled_log_probs_old).exp()
                 obj = ratio * sampled_advantages
                 obj_clipped = ratio.clamp(1.0 - self.config.ppo_ratio_clip,

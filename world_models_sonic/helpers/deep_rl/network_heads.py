@@ -46,7 +46,6 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         self.z_shape = z_shape
         self.viewer = None
         self.max_hidden_states = 2
-        self.hidden_state = None
         self.set_gpu(gpu)
 
     def pad_hidden_states(self, hidden_states):
@@ -55,76 +54,72 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         batch_size = hidden_states.size(0)
         pad = self.max_hidden_states - hidden_states.size(1)
         if pad > 0:
+            print('pad', pad)
             padding = torch.zeros(batch_size, pad, self.world_model.mdnrnn.hidden_size)
             if hidden_states.is_cuda:
                 padding = padding.cuda()
                 hidden_states = torch.cat([padding, hidden_states], dim=1)
         return hidden_states
 
-    def process_obs(self, obs, action=None, next_obs=None, hidden_state=None):
-        """Convert observation to latent space using world model."""
-        self.img = obs
-        batch_size = obs.shape[0]
-
-        obs = self.tensor(obs).transpose(1, 3).contiguous()
-        hidden_state = [h[None, :].detach() for h in hidden_state.transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
-        if action is None:
-            # FIXME when we don't get an action (e.g. rollout) just use null action to make prediction
-            action = torch.zeros(batch_size, 1)
-        else:
-            action = action.view(batch_size, 1)
-
-        # Input is (batch, height, width, channels)
-        with torch.no_grad():
-            z_next, z, hidden_state = self.world_model.forward(
-                obs.detach(),
-                action.detach(),
-                hidden_state=hidden_state
-            )
-            self.z = z.data
-            self.z_next = z_next.data
-
-        # I want it to know what action it did last, so it could copy. So I'm going to add the one-hot action to the state
-        action_1hot = torch.eye(self.world_model.mdnrnn.action_dim)[action.long().squeeze()]
-        action_1hot = action_1hot.view(batch_size, -1)
-        cuda = next(iter(self.parameters())).is_cuda
-        if cuda:
-            action_1hot = action_1hot.cuda()
-
-        latest_hidden = hidden_state[-1].squeeze(0)  # squeeze so we can concat
-        obs = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
-        return obs, self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach()
-
-    def train_world_model(self, obs, action=None, next_obs=None, hidden_state=None, train=True):
+    def train_world_model(self, obs, action=None, next_obs=None, hidden_states=None, train=True):
         obs = self.tensor(obs).transpose(2, 4).contiguous()
         next_obs = self.tensor(next_obs).transpose(2, 4).contiguous()
 
         # Only pass in the first hidden state. Expects [(1, batch, z_dim)]*2
-        hidden_state = [h[None, :] for h in hidden_state[:, 0].transpose(1, 0).contiguous().detach()] if hidden_state is not None else None
+        hidden_states = [h[None, :] for h in hidden_states[:, 0].transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
 
         if train:
-            z_next, z, hidden_state, info = self.world_model.forward_train(
+            z_next, z, hidden_states, info = self.world_model.forward_train(
                 obs.detach(),
                 action.detach(),
                 next_obs.detach(),
-                hidden_state
+                hidden_states
             )
         else:
             with torch.no_grad():
-                z_next, z, hidden_state, info = self.world_model.forward_train(
+                z_next, z, hidden_states, info = self.world_model.forward_train(
                     obs.detach(),
                     action.detach(),
                     next_obs.detach(),
-                    hidden_state,
+                    hidden_states,
                     test=True
                 )
-        return z_next.detach(), z.detach(), self.pad_hidden_states(hidden_state[-self.max_hidden_states:]).detach(), info['loss'].detach()
+        return z_next.detach(), z.detach(), self.pad_hidden_states(hidden_states[-self.max_hidden_states:]).detach(), info['loss'].detach()
 
-    def predict(self, obs, action=None, next_obs=None, hidden_state=None):
+    def predict(self, obs, action=None, next_obs=None, hidden_states=None):
         # In rollout (non training mode) when no next_obs is provided
         is_rollout = next_obs is None
+        self.img = obs
+        batch_size = obs.shape[0]
 
-        obs_z, hidden_state = self.process_obs(obs, action, next_obs, hidden_state)
+        obs = self.tensor(obs).transpose(1, 3).contiguous()
+
+        # Process the observation to get the latent space
+        # Input is (batch, height, width, channels)
+        with torch.no_grad():
+            _, mu_vae, logvar_vae = self.world_model.vae.forward(obs.detach())
+            z = self.world_model.vae.sample(mu_vae, logvar_vae)
+
+        # Now use the last hidden state and the current latent space z to input to the controller
+        if hidden_states is None:
+            hidden_states = self.pad_hidden_states(self.world_model.mdnrnn.default_hidden_state(z[:, None])[-self.max_hidden_states:])
+        hidden_states = [h[None, :].detach() for h in hidden_states.transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
+        latest_hidden = hidden_states[-1].squeeze(0)  # squeeze so we can concat
+        # FIXME get rid of this (legacy_action_append) code, and don't append action to state
+        # (since we don't know the action in advance when rolling out)
+        # and then retrain model
+        legacy_action_append = True
+        if legacy_action_append:
+            action = torch.zeros(batch_size, 1)  # Null vector untill we remove this code
+            action_1hot = torch.eye(self.world_model.mdnrnn.action_dim)[action.long().squeeze()]
+            action_1hot = action_1hot.view(batch_size, -1)
+            cuda = next(iter(self.parameters())).is_cuda
+            if cuda:
+                action_1hot = action_1hot.cuda()
+
+            obs_z = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
+        else:
+            obs_z = torch.cat([z, latest_hidden], -1).detach()  # Gradient block between world model and controller
 
         # Predict next action and value
         phi = self.network.phi_body(obs_z)
@@ -133,13 +128,23 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         prob = F.softmax(self.network.fc_action(phi_a), dim=-1)
         v = self.network.fc_critic(phi_v)
         dist = torch.distributions.Categorical(probs=prob)
-        if action is None:
-            action = dist.sample()
-        if is_rollout and self._render:
-                self.render()
+        action = dist.sample()
         log_prob = dist.log_prob(action).unsqueeze(-1)
 
-        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_state
+        # MDNRNN forward to get next hidden state (now that we have the action)
+        with torch.no_grad():
+            pi, mu, sigma, hidden_states = self.world_model.mdnrnn.forward(z[:, None], action[:, None].detach(), hidden_state=hidden_states)
+            z_next = self.world_model.mdnrnn.sample(pi, mu, sigma)
+            z_next = z_next.squeeze(1)
+            self.z = z.data
+            self.z_next = z_next.data
+
+        if is_rollout and self._render:
+            self.render()
+
+        hidden_states = self.pad_hidden_states(hidden_states[-self.max_hidden_states:]).detach()
+
+        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_states
 
     def render(self, mode='world_model', close=False):
         if close:
@@ -199,7 +204,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 img_z = img_z.view((img_z.size(0), img_z.size(1), 3, 4)).mean(-1)
                 img_z = img_z.data.cpu().numpy()
                 img_z = (img_z * 255.0).astype(np.uint8)
-                img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1) #[:, :, -3:]
+                img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1)
                 img_z_next = img_z_next.view((img_z_next.size(0), img_z_next.size(1), 3, 4)).mean(-1)
                 img_z_next = img_z_next.data.cpu().numpy()
                 img_z_next = (img_z_next * 255.0).astype(np.uint8)
