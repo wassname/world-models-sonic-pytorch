@@ -1,6 +1,6 @@
 # world-models-sonic-pytorch
 
-My attempt to implement an unsupervised dynamics model with ideas from a few papers
+My attempt to implementing an unsupervised dynamics model with ideas from a few papers
 - ["World Models"](https://arxiv.org/abs/1803.10122)
 - ["MERLIN "or "Unsupervised Predictive Memory in a Goal-Directed Agent"](https://arxiv.org/abs/1803.10760 )
 - ["Decoupling Dynamics and Reward for Transfer Learning"](https://arxiv.org/abs/1804.10689)
@@ -8,7 +8,7 @@ My attempt to implement an unsupervised dynamics model with ideas from a few pap
 
 I use a dynamics model, an inverse model, and a VAE. For the controller I use Proximal Policy Optimization (PPO).
 
-I also use Curiosity as a auxillary reward. The theory is that we like to see/listen to things that we can learn from, but then we don't want to see them again because we've learnt all we could. There's more about [that theory here](http://people.idsia.ch/~juergen/creativity.html).
+I also use Curiosity as a axillary reward. The theory is that we like to see/listen to things that we can learn from, but then we don't want to see them again because we've learnt all we could. There's more about [that theory here](http://people.idsia.ch/~juergen/creativity.html).
 
 One way to frame this in reinforcement learning is by rewarding a controller for finding novel states and giving them to the world model. Then we measuring how much the loss reduces before and after training. That's out reward (There are probably better ways to frame it).
 
@@ -26,6 +26,7 @@ The end result was a score of ~2400/9000 and place ~#200 on the leaderboard to t
     - https://github.com/goolulusaurs/WorldModels
     - https://github.com/ShangtongZhang/DeepRL
     - https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
+    - https://github.com/hardmaru/WorldModelsExperiments/blob/master/carracing/rnn/rnn.py
 
 
 ## Setup
@@ -68,7 +69,7 @@ To set them, you should run for a few epochs with them set to 1, then record the
 
 Other hyperparamers can sometimes needs to be tweaked. A small learning rate may be needed to initially train the VAE, say 1e-5. Then a higher one may be needed to get the MDRNN to convert, say 3e-4.
 
-Overall it can take quite a small learning rate to train multiple network simulataneusly without being to high on any of them.
+Overall it can take quite a small learning rate to train multiple network simultaneously without being to high on any of them.
 
 ### Curiosity weights
 
