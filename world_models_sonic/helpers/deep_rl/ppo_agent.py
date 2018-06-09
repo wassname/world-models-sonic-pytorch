@@ -57,6 +57,7 @@ class PPOAgent(BaseAgent):
         rollout = []
         states = self.states
         hidden_states = self.hidden_states
+        steps = config.rollout_length * config.num_workers
 
         for _ in range(config.rollout_length):
             with torch.no_grad():
@@ -134,15 +135,15 @@ class PPOAgent(BaseAgent):
 
                 config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
                 config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
-                # print('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
-                #     extrinsic.min().cpu().item(),
-                #     extrinsic.mean().cpu().item(),
-                #     extrinsic.max().cpu().item(),
-                #     instrinsic.min().cpu().item(),
-                #     instrinsic.mean().cpu().item(),
-                #     instrinsic.max().cpu().item()
-                # ))
-        del states, value, actions, log_probs, rewards, terminals, next_states, extrinsic, instrinsic, intrinsic_reward, intrinsic_rewards
+                if (self.total_steps // steps) % 20 == 0:
+                    config.logger.info('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
+                        extrinsic.min().cpu().item(),
+                        extrinsic.mean().cpu().item(),
+                        extrinsic.max().cpu().item(),
+                        instrinsic.min().cpu().item(),
+                        instrinsic.mean().cpu().item(),
+                        instrinsic.max().cpu().item()
+                    ))
 
         # Calculate advantages again now that we have changed the rewards
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
@@ -186,5 +187,4 @@ class PPOAgent(BaseAgent):
                 config.logger.scalar_summary('sampled_returns', sampled_returns.mean())
         config.logger.writer.file_writer.flush()
 
-        steps = config.rollout_length * config.num_workers
         self.total_steps += steps

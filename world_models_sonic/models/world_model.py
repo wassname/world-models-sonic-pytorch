@@ -25,13 +25,6 @@ class WorldModel(torch.nn.modules.Module):
         self.last_loss_mdn = 0
         self.last_loss_inv = 0
 
-    # def forward(self, x, action=None, hidden_state=None):
-    #     _, mu_vae, logvar_vae = self.vae.forward(x)
-    #     z = self.vae.sample(mu_vae, logvar_vae)
-    #     pi, mu, sigma, hidden_state = self.mdnrnn.forward(z[:, None], action, hidden_state=hidden_state)
-    #     z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
-    #     return z_next_pred.squeeze(1), z, hidden_state
-
     def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
         batch_size = X.size(0)
         seq_len = X.size(1)
@@ -55,15 +48,15 @@ class WorldModel(torch.nn.modules.Module):
             z_obs = z_obs.cuda()
             z_obs_next = z_obs_next.cuda()
             actions = actions.cuda()
-        pi, mu, sigma, hidden_state = self.mdnrnn.forward(z_obs, actions, hidden_state=hidden_state)
+        logpi, mu, logsigma, hidden_state = self.mdnrnn.forward(z_obs, actions, hidden_state=hidden_state)
 
         # We are evaluating how the output distribution for the next step
         # matches the real next step. So we have to discard the last step in the
         # sequence which has no next step.
-        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, pi, mu, sigma).view((-1))
+        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, logpi, mu, logsigma).view((-1))
 
         # Finv forward
-        z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
+        z_next_pred = self.mdnrnn.sample(logpi, mu, logsigma)
         action_pred = self.finv(z_obs, z_next_pred).float()
         actions_hot = torch.eye(self.mdnrnn.action_dim)[actions.long()].cuda()
         loss_inv = F.binary_cross_entropy_with_logits(action_pred, actions_hot, reduce=False).sum(2).view((-1))
