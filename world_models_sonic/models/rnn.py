@@ -9,6 +9,7 @@ logeps = math.log(eps)
 
 
 logSqrtTwoPI = np.log(np.sqrt(2.0 * np.pi))
+debug = False
 
 
 def assert_finite(x):
@@ -149,9 +150,10 @@ class MDNRNN(nn.Module):
             logpi -= torch.log(self.tau)
             logsigma += torch.log(self.tau ** 0.5)
 
-        assert_finite(logpi)
-        assert_finite(logsigma)
-        assert_finite(mu)
+        if debug:
+            assert_finite(logpi)
+            assert_finite(logsigma)
+            assert_finite(mu)
 
         return logpi, mu, logsigma
 
@@ -167,18 +169,21 @@ class MDNRNN(nn.Module):
         """
         # Reshape pi, so we can get the multinomial along the mixture dimension
         batch, seq, mixtures, z_dim = logpi.size()
-        assert_finite(logpi.exp())
-        assert ((logpi.sum(axis) - 1) < 0.01).all(), 'pi should be softmaxed along axis'
+        if debug:
+            assert_finite(logpi.exp())
+            assert ((logpi.sum(axis) - 1) < 0.01).all(), 'pi should be softmaxed along axis'
         axis_size = logpi.size(axis)
         logpi = logpi.transpose(axis, 3).contiguous()
         logpi_flat = logpi.view(-1, axis_size).clamp(1e-7)
-        assert ((logpi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
+        if debug:
+            assert ((logpi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
         # sample
         k = torch.distributions.Multinomial(1, logpi_flat).sample()
         # reshape back
         k = k.view(*logpi.size()).transpose(axis, 3).contiguous()
-        assert (k.sum(axis) == 1).all(), 'should sum to one'
-        assert (k.max(axis)[0] == 1).all(), 'max should be one'
+        if debug:
+            assert (k.sum(axis) == 1).all(), 'should sum to one'
+            assert (k.max(axis)[0] == 1).all(), 'max should be one'
         return k
 
     def sample(self, logpi, mu, logsigma):
@@ -193,20 +198,22 @@ class MDNRNN(nn.Module):
             z_sample = z_normals.rsample()
         else:
             z_sample = z_normals.sample()
-        assert_finite(z_sample)
+        if debug:
+            assert_finite(z_sample)
         return z_sample
 
     def rnn_r_loss(self, y_true, logpi, mu, logsigma):
-        # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
-        # and https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
-        # and https://github.com/JunhongXu/world-models-pytorch
+        # see https://github.com/hardmaru/WorldModelsExperiments/blob/c0cb2dee69f4b05d9494bc0263eca25a7f90d555/carracing/rnn/rnn.py#L139
+        #     https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
+        #     https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
+        #     https://github.com/JunhongXu/world-models-pytorch
 
-        # probability shape [batch, seq, num_mixtures, z_dim]
         batch_size, seq_len, _ = y_true.size()
         y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
+        # probability shape [batch, seq, num_mixtures, z_dim]
         logprob = lognormal(y_true, mu, logsigma).clamp(logeps, -logeps)
         v = logpi + logprob
-        loss = logsumexp(v, dim=2, keepdim=True)
+        loss = -logsumexp(v, dim=2, keepdim=True)
 
         # mean over seq and z dim and num_mixtures
         loss = loss.view((batch_size, seq_len, -1)).mean(2)
