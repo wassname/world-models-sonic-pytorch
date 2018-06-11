@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.distributions
 import math
 import numpy as np
+from torch.nn import functional as F
 
 from ..config import eps
 logeps = math.log(eps)
