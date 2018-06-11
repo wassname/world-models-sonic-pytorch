@@ -42,15 +42,13 @@ class PPOAgent(BaseAgent):
                 td_error = rewards + config.discount * terminals * next_value.detach() - value.detach()
                 advantages = advantages * config.gae_tau * config.discount * terminals + td_error
 
-            inds = zip([i] * len(rewards), range(len(rewards)))
-            inds = self.network.tensor(list(inds)).long()
-            processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states, inds]
+            processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states]
 
         # Concat the rollout vars
-        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
+        states, actions, log_probs_old, returns, advantages, next_states, hidden_states = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
 
         advantages = (advantages - advantages.mean()) / advantages.std()
-        return states, actions, log_probs_old, returns, advantages, next_states, hidden_states, inds
+        return states, actions, log_probs_old, returns, advantages, next_states, hidden_states
 
     def iteration(self):
         config = self.config
@@ -88,6 +86,7 @@ class PPOAgent(BaseAgent):
         self.hidden_states = hidden_states.detach()
 
         if config.train_world_model:
+            # TODO it might be good to encode all the states here, that avoid doing it multiple times during each PPO epoch
 
             # Train world model on rollouts, that way the mdn-rnn get's a sequence
             # Stack rollouts into (seq_len, batch_size, ..)
@@ -118,7 +117,7 @@ class PPOAgent(BaseAgent):
                     for i, k in enumerate(batch_indices):
                         intrinsic_reward = config.intrinsic_reward_normalizer(intrinsic_rewards[i].cpu().numpy()[:, None])[:, 0]
                         intrinsic_reward = (intrinsic_reward - config.curiosity_boredom) * config.curiosity_weight
-                        intrinsic_reward = self.network.tensor(intrinsic_reward)
+                        intrinsic_reward = self.network.tensor(intrinsic_reward).clamp(0)
                         for j in range(len(intrinsic_reward)):
                             if config.curiosity_only:
                                 rollout[j][4][k] = intrinsic_reward[j].detach()
@@ -146,7 +145,7 @@ class PPOAgent(BaseAgent):
                     ))
 
         # Calculate advantages again now that we have changed the rewards
-        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
+        states, actions, log_probs_old, returns, advantages, next_states, hidden_states = self.process_rollout(rollout, pending_value)
 
         # Now train PPO
         batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
