@@ -144,7 +144,7 @@ class MDNRNN(nn.Module):
         logpi = logpi.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(logeps, -logeps)
 
         # A stable log domain softmax
-        logpi = logpi - logsumexp(logpi, dim=2, keepdim=True)  # Weights over n_mixtures should sum to one
+        logpi = F.log_softmax(logpi, 2)  # Weights over n_mixtures should sum to one
 
         # add temperature
         if self.tau > 0:
