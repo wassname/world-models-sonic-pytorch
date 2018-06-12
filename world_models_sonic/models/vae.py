@@ -153,7 +153,7 @@ def loss_function_vae(recon_x, x, mu, logvar):
     x = x.view(n, -1)
 
     # L2 distance
-    loss_recon = torch.sum(torch.pow(recon_x - x, 2), 1)
+    loss_recon = F.mse_loss(x, recon_x, reduce=False).sum(1)
 
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
