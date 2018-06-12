@@ -56,7 +56,7 @@ class WorldModel(torch.nn.modules.Module):
         loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, logpi, mu, logsigma).view((-1))
 
         # Finv forward
-        z_next_pred = self.mdnrnn.sample(pi, mu, sigma)
+        z_next_pred = self.mdnrnn.sample(logpi, mu, logsigma)
         action_pred = self.finv(z_obs, z_next_pred)
         action_pred = F.log_softmax(action_pred, -1)
         loss_inv = F.nll_loss(
