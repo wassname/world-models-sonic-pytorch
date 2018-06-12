@@ -48,12 +48,12 @@ class WorldModel(torch.nn.modules.Module):
             z_obs = z_obs.cuda()
             z_obs_next = z_obs_next.cuda()
             actions = actions.cuda()
-        pi, mu, sigma, hidden_state = self.mdnrnn.forward(z_obs, actions, hidden_state=hidden_state)
+        logpi, mu, logsigma, hidden_state = self.mdnrnn.forward(z_obs, actions, hidden_state=hidden_state)
 
         # We are evaluating how the output distribution for the next step
         # matches the real next step. So we have to discard the last step in the
         # sequence which has no next step.
-        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, pi, mu, sigma).view((-1))
+        loss_mdn = self.mdnrnn.rnn_loss(z_obs_next, logpi, mu, logsigma).view((-1))
 
         # Finv forward
         z_next_pred = self.mdnrnn.sample(pi, mu, sigma)

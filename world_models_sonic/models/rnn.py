@@ -1,12 +1,54 @@
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 import torch.distributions
 import math
 import numpy as np
+from torch.nn import functional as F
 
 from ..config import eps
 logeps = math.log(eps)
+
+
+logSqrtTwoPI = np.log(np.sqrt(2.0 * np.pi))
+debug = False
+
+
+def assert_finite(x):
+    """Quick pytorch test that there are no nan's or infs."""
+    assert ((x + 1) != x).all(), 'contains infs: {}'.format(x)
+    assert (x == x).all(), 'contains nans: {}'.format(x)
+
+
+def lognormal(y, mean, logstd):
+    return -0.5 * ((y - mean) / torch.exp(logstd)) ** 2 - logstd - logSqrtTwoPI
+
+
+def logsumexp(inputs, dim=None, keepdim=False):
+    """Numerically stable logsumexp.
+
+    Args:
+        inputs: A Variable with any shape.
+        dim: An integer.
+        keepdim: A boolean.
+
+    Returns:
+        Equivalent of log(sum(exp(inputs), dim=dim, keepdim=keepdim)).
+
+    From https://github.com/pytorch/pytorch/issues/2591#issuecomment-364474328
+    TODO replace with native torch.logsumexp after v0.4.1 of torch
+
+    """
+    # For a 1-D array x (any array along a single dimension),
+    # log sum exp(x) = s + log sum exp(x - s)
+    # with s = max(x) being a common choice.
+    if dim is None:
+        inputs = inputs.view(-1)
+        dim = 0
+    s, _ = torch.max(inputs, dim=dim, keepdim=True)
+    outputs = s + (inputs - s).exp().sum(dim=dim, keepdim=True).log()
+    if not keepdim:
+        outputs = outputs.squeeze(dim)
+    return outputs
 
 
 class MDNRNN(nn.Module):
@@ -24,7 +66,6 @@ class MDNRNN(nn.Module):
         K has n_mixture elements.
         """
         super(MDNRNN, self).__init__()
-        # define rnn
         self.inpt_size = z_dim + action_dim
         self.hidden_size = hidden_size
         self.action_dim = action_dim
@@ -51,6 +92,8 @@ class MDNRNN(nn.Module):
 
     def forward(self, inpt, action_discrete=None, hidden_state=None):
         """
+        Forward.
+
         :param inpt: a tensor of size (batch_size, seq_len, D)
         :param hidden_state: two tensors of size (1, batch_size, hidden_size)
         :param action: a tensor of (batch_size, seq_len, action_dim)
@@ -70,14 +113,14 @@ class MDNRNN(nn.Module):
             # https://www.cs.toronto.edu/~hinton/csc2535/notes/lec10new.pdf
             hidden_state = self.default_hidden_state(inpt)
 
-        # for hs in hidden_state:
-        #     assert (hs == hs).all(), 'should be no nans in hidden_state'
+        for hs in hidden_state:
+            assert_finite(hs)
 
         # concatenate input and action
         concat = torch.cat((inpt, action), dim=-1)
         output, hidden_state = self.rnn(concat, hidden_state)
-        pi, mean, sigma = self.get_mixture_coef(output)
-        return pi, mean, sigma, hidden_state
+        logpi, mean, sigma = self.get_mixture_coef(output)
+        return logpi, mean, sigma, hidden_state
 
     def get_mixture_coef(self, output):
         batch_size, seq_len, _ = output.size()
@@ -93,39 +136,29 @@ class MDNRNN(nn.Module):
         # N * seq_len
         mu = mixture[..., :self.n_mixture * self.z_dim]
         logsigma = mixture[..., self.n_mixture * self.z_dim: self.n_mixture * self.z_dim * 2]
-        pi = mixture[..., self.n_mixture * self.z_dim * 2:self.n_mixture * self.z_dim * 3]
+        logpi = mixture[..., self.n_mixture * self.z_dim * 2:self.n_mixture * self.z_dim * 3]
 
         # Reshape
         mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
         logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps), -np.log(eps))
-        pi = pi.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(eps)
+        logpi = logpi.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(logeps, -logeps)
 
-        # Transform
-        sigma = torch.exp(logsigma)
-        pi = F.softmax(pi, 2)  # Weights over n_mixtures should sum to one
+        # A stable log domain softmax
+        logpi = F.log_softmax(logpi, 2)  # Weights over n_mixtures should sum to one
 
         # add temperature
         if self.tau > 0:
-            pi /= self.tau
-            sigma *= self.tau ** 0.5
+            logpi -= torch.log(self.tau)
+            logsigma += torch.log(self.tau ** 0.5)
 
-        assert (pi == pi).all(), 'nans in pi'
-        assert (sigma == sigma).all(), 'nans in sigma'
-        assert (mu == mu).all(), 'nans in sigma'
+        if debug:
+            assert_finite(logpi)
+            assert_finite(logsigma)
+            assert_finite(mu)
 
-        return pi, mu, sigma
+        return logpi, mu, logsigma
 
-    def normal_prob(self, y_true, mu, sigma, pi):
-        """Probability of a value given the distribution."""
-        # Repeat, for number of repeated mixtures
-        y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
-
-        # Use pytorches normal dist class to calc the probs
-        z_normals = torch.distributions.Normal(mu, sigma)
-        z_prob = z_normals.log_prob(y_true).exp().clamp(logeps, -logeps).exp()
-        return (z_prob * pi).sum(2)  # weight, then sum over the mixtures
-
-    def multinomial_on_axis(self, pi, axis=2):
+    def multinomial_on_axis(self, logpi, axis=2):
         """
         Take the multinomial along one dimenionself.
 
@@ -136,54 +169,61 @@ class MDNRNN(nn.Module):
         e.g. k * mu = [0, 0, 1, 0] * [1.4, 1.5, 0.2, 3] = [0, 0, 0.2, 0]
         """
         # Reshape pi, so we can get the multinomial along the mixture dimension
-        batch, seq, mixtures, z_dim = pi.size()
-        # np.testing.assert_almost_equal(pi.sum(axis).cpu().data.numpy(), 1, decimal=4, err_msg='pi should be softmaxed along axis')
-        assert ((pi.sum(axis) - 1) < 0.01).all(), 'pi should be softmaxed along axis'
-        axis_size = pi.size(axis)
-        pi = pi.transpose(axis, 3).contiguous()
-        pi_flat = pi.view(-1, axis_size).clamp(1e-7)
-        assert ((pi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
-        # np.testing.assert_almost_equal(pi_flat.sum(-1).cpu().data.numpy(), 1, decimal=4, err_msg='should reshape right axis')
+        batch, seq, mixtures, z_dim = logpi.size()
+        if debug:
+            assert_finite(logpi.exp())
+            assert ((logpi.sum(axis) - 1) < 0.01).all(), 'pi should be softmaxed along axis'
+        axis_size = logpi.size(axis)
+        logpi = logpi.transpose(axis, 3).contiguous()
+        logpi_flat = logpi.view(-1, axis_size).clamp(1e-7)
+        if debug:
+            assert ((logpi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
         # sample
-        k = torch.distributions.Multinomial(1, pi_flat).sample()
+        k = torch.distributions.Multinomial(1, logpi_flat).sample()
         # reshape back
-        k = k.view(*pi.size()).transpose(axis, 3).contiguous()
-        assert (k.sum(axis) == 1).all(), 'should sum to one'
-        assert (k.max(axis)[0] == 1).all(), 'max should be one'
+        k = k.view(*logpi.size()).transpose(axis, 3).contiguous()
+        if debug:
+            assert (k.sum(axis) == 1).all(), 'should sum to one'
+            assert (k.max(axis)[0] == 1).all(), 'max should be one'
         return k
 
-    def sample(self, pi, mu, sigma):
+    def sample(self, logpi, mu, logsigma):
         """Sample z from Z."""
-        k = self.multinomial_on_axis(pi, axis=2)
+        # Select the sampled distribution
+        k = self.multinomial_on_axis(logpi.exp(), axis=2)
         mu = (mu * k).sum(2)
-        sigma = (sigma * k).sum(2)
+        sigma = (logsigma.exp() * k).sum(2)
+        # Sample from the distribution
         z_normals = torch.distributions.Normal(mu, sigma)
         if self.training:
             z_sample = z_normals.rsample()
         else:
             z_sample = z_normals.sample()
-        assert (z_sample == z_sample).all(), 'has nans'
+        if debug:
+            assert_finite(z_sample)
         return z_sample
 
-    def rnn_r_loss(self, y_true, pi, mu, sigma):
-        # See https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
-        # and https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
-        # and https://github.com/JunhongXu/world-models-pytorch
+    def rnn_r_loss(self, y_true, logpi, mu, logsigma):
+        # see https://github.com/hardmaru/WorldModelsExperiments/blob/c0cb2dee69f4b05d9494bc0263eca25a7f90d555/carracing/rnn/rnn.py#L139
+        #     https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
+        #     https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
+        #     https://github.com/JunhongXu/world-models-pytorch
 
-        # probability shape [batch, seq, num_mixtures, z_dim]
         batch_size, seq_len, _ = y_true.size()
-        prob = self.normal_prob(y_true, mu, sigma, pi)
-        loss = -torch.log(prob + eps)
+        y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
+        # probability shape [batch, seq, num_mixtures, z_dim]
+        logprob = lognormal(y_true, mu, logsigma).clamp(logeps, -logeps)
+        v = logpi + logprob
+        loss = -logsumexp(v, dim=2, keepdim=True)
 
         # mean over seq and z dim and num_mixtures
-        batch_size = y_true.size(0)
         loss = loss.view((batch_size, seq_len, -1)).mean(2)
 
-        # We want the loss to +ve and approach zero. But, since we clip to eps(ilon)
+        # We want the loss to +ve and approach zero. But, since we add eps(ilon)
         # it's approaching `log(eps)`` E.g. `log(1e-7)=-16.12`. So let's shift it to approach zero from above.
         loss -= np.log(eps)
         return loss
 
-    def rnn_loss(self, y_true, pi, mu, sigma):
-        r_loss = self.rnn_r_loss(y_true, pi, mu, sigma)
+    def rnn_loss(self, y_true, logpi, mu, logsigma):
+        r_loss = self.rnn_r_loss(y_true, logpi, mu, logsigma)
         return r_loss
