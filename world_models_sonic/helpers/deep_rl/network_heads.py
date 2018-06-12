@@ -90,7 +90,6 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         # In rollout (non training mode) when no next_obs is provided
         is_rollout = next_obs is None
         self.img = obs
-        batch_size = obs.shape[0]
 
         obs = self.tensor(obs).transpose(1, 3).contiguous()
 
@@ -105,21 +104,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
             hidden_states = self.pad_hidden_states(self.world_model.mdnrnn.default_hidden_state(z[:, None])[-self.max_hidden_states:])
         hidden_states = [h[None, :].detach() for h in hidden_states.transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
         latest_hidden = hidden_states[-1].squeeze(0)  # squeeze so we can concat
-        # FIXME get rid of this (legacy_action_append) code, and don't append action to state
-        # (since we don't know the action in advance when rolling out)
-        # and then retrain model
-        legacy_action_append = True
-        if legacy_action_append:
-            action = torch.zeros(batch_size, 1)  # Null vector untill we remove this code
-            action_1hot = torch.eye(self.world_model.mdnrnn.action_dim)[action.long().squeeze()]
-            action_1hot = action_1hot.view(batch_size, -1)
-            cuda = next(iter(self.parameters())).is_cuda
-            if cuda:
-                action_1hot = action_1hot.cuda()
-
-            obs_z = torch.cat([z, latest_hidden, action_1hot], -1).detach()  # Gradient block between world model and controller
-        else:
-            obs_z = torch.cat([z, latest_hidden], -1).detach()  # Gradient block between world model and controller
+        obs_z = torch.cat([z, latest_hidden], -1).detach()  # Gradient block between world model and controller
 
         # Predict next action and value
         phi = self.network.phi_body(obs_z)
@@ -138,6 +123,11 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
             z_next = z_next.squeeze(1)
             self.z = z.data
             self.z_next = z_next.data
+
+            action_pred = F.softmax(self.world_model.finv(z, z_next), 1)
+            self.action = action.data
+            self.action_pred = action_pred.max(-1)[1].data
+            self.action_prob = action_pred.max(-1)[0].data
 
         if is_rollout and self._render:
             self.render()
@@ -227,4 +217,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 self.viewer_img_z_next.imshow(img_z_next)
                 self.viewer_z.imshow(z_uint8)
                 self.viewer_z_next.imshow(z_next_uint8)
+
+                # finally we will also print action vs pred action
+                print('action true/pred (prob): {} {} ({:2.4f})'.format(self.action.cpu().item(), self.action_pred.cpu().item(), self.action_prob.cpu().item()))
                 return self.viewer.isopen

@@ -142,7 +142,6 @@ class PPOAgent(BaseAgent):
                 #     instrinsic.mean().cpu().item(),
                 #     instrinsic.max().cpu().item()
                 # ))
-        del states, value, actions, log_probs, rewards, terminals, next_states, extrinsic, instrinsic, intrinsic_reward, intrinsic_rewards
 
         # Calculate advantages again now that we have changed the rewards
         states, actions, log_probs_old, returns, advantages, next_states, hidden_states, rewards = self.process_rollout(rollout, pending_value)
