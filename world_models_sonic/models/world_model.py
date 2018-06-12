@@ -58,8 +58,11 @@ class WorldModel(torch.nn.modules.Module):
         # Finv forward
         z_next_pred = self.mdnrnn.sample(logpi, mu, logsigma)
         action_pred = self.finv(z_obs, z_next_pred).float()
-        actions_hot = torch.eye(self.mdnrnn.action_dim)[actions.long()].cuda()
-        loss_inv = F.binary_cross_entropy_with_logits(action_pred, actions_hot, reduce=False).sum(2).view((-1))
+        loss_inv = F.nll_loss(
+            action_pred.view(batch_size * seq_len, self.mdnrnn.action_dim),
+            actions.view(-1,).long(),
+            reduce=False
+        )
 
         # To reduce the need for hyperparameters which balance the losses we will
         # normalise for number of pixels, action_dim, z_dim etc
