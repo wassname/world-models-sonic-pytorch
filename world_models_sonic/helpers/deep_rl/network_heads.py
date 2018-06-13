@@ -48,6 +48,9 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         self.max_hidden_states = 2
         self.set_gpu(gpu)
 
+    def default_hidden_state(self, obs):
+        return self.pad_hidden_states(self.world_model.mdnrnn.default_hidden_state(obs[:, None])[-self.max_hidden_states:])
+
     def pad_hidden_states(self, hidden_states):
         """Pad hidden states to (batch, max_hidden_states, z_dim)."""
         hidden_states = torch.cat(hidden_states, dim=0).transpose(0, 1).contiguous()
@@ -84,13 +87,10 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                     hidden_states,
                     test=True
                 )
-        return z_next.detach(), z.detach(), self.pad_hidden_states(hidden_states[-self.max_hidden_states:]).detach(), info['loss'].detach()
+        return info['loss'].detach()
 
-    def predict(self, obs, action=None, next_obs=None, hidden_states=None):
-        # In rollout (non training mode) when no next_obs is provided
-        is_rollout = next_obs is None
-        self.img = obs
-
+    def process_obs(self, obs, hidden_states):
+        self.img = obs  # For rendering
         obs = self.tensor(obs).transpose(1, 3).contiguous()
 
         # Process the observation to get the latent space
@@ -100,41 +100,55 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
             z = self.world_model.vae.sample(mu_vae, logvar_vae)
 
         # Now use the last hidden state and the current latent space z to input to the controller
-        if hidden_states is None:
-            hidden_states = self.pad_hidden_states(self.world_model.mdnrnn.default_hidden_state(z[:, None])[-self.max_hidden_states:])
+
         hidden_states = [h[None, :].detach() for h in hidden_states.transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
         latest_hidden = hidden_states[-1].squeeze(0)  # squeeze so we can concat
         obs_z = torch.cat([z, latest_hidden], -1).detach()  # Gradient block between world model and controller
+        return obs_z
+
+    def predict(self, obs_z, action=None, next_obs_z=None, hidden_states=None):
+        # In rollout (non training mode) when no next_obs is provided
+        is_rollout = next_obs_z is None
+
+        if hidden_states is None:
+            hidden_states = self.default_hidden_state(obs_z)
+            print('error should have got a hidden state')
+            raise Exception('error hidden state')
+        hidden_states = [h[None, :].detach() for h in hidden_states.transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
 
         # Predict next action and value
         phi = self.network.phi_body(obs_z)
         phi_a = self.network.actor_body(phi)
         phi_v = self.network.critic_body(phi)
-        prob = F.softmax(self.network.fc_action(phi_a), dim=-1)
-        v = self.network.fc_critic(phi_v)
-        dist = torch.distributions.Categorical(probs=prob)
-        action = dist.sample()
-        log_prob = dist.log_prob(action).unsqueeze(-1)
+        value = self.network.fc_critic(phi_v)
+        # action_prob = F.softmax(self.network.fc_action(phi_a), dim=-1)
+        action_logits = self.network.fc_action(phi_a)
+        # dist = torch.distributions.Categorical(action_prob=action_prob)
+        action_dist = torch.distributions.Categorical(logits=action_logits)
+        action = action_dist.sample()
+        log_prob = action_dist.log_prob(action).unsqueeze(-1)
+        entropy = action_dist.entropy().unsqueeze(-1)
 
         # MDNRNN forward to get next hidden state (now that we have the action)
         with torch.no_grad():
+            z = obs_z[:, :self.world_model.mdnrnn.z_dim]
             pi, mu, sigma, hidden_states = self.world_model.mdnrnn.forward(z[:, None], action[:, None].detach(), hidden_state=hidden_states)
+            hidden_states = self.pad_hidden_states(hidden_states[-self.max_hidden_states:]).detach()
+
+        if is_rollout and self._render:
+            # Save for visualizing
             z_next = self.world_model.mdnrnn.sample(pi, mu, sigma)
             z_next = z_next.squeeze(1)
+            action_pred = F.softmax(self.world_model.finv(z, z_next), 1)
+
             self.z = z.data
             self.z_next = z_next.data
-
-            action_pred = F.softmax(self.world_model.finv(z, z_next), 1)
             self.action = action.data
             self.action_pred = action_pred.max(-1)[1].data
             self.action_prob = action_pred.max(-1)[0].data
-
-        if is_rollout and self._render:
             self.render()
 
-        hidden_states = self.pad_hidden_states(hidden_states[-self.max_hidden_states:]).detach()
-
-        return action, log_prob, dist.entropy().unsqueeze(-1), v, hidden_states
+        return action, log_prob, entropy, value, hidden_states
 
     def render(self, mode='world_model', close=False):
         if close:

@@ -80,7 +80,8 @@ class MDNRNN(nn.Module):
     def default_hidden_state(self, z):
         # you init the state to some constant value
         # https://www.cs.toronto.edu/~hinton/csc2535/notes/lec10new.pdf
-        batch_size, seq_len, _ = z.size()
+        batch_size = z.size(0)
+        seq_len = z.size(1)
         cuda = z.is_cuda
         hidden_state = (
             torch.zeros((1, batch_size, self.hidden_size), dtype=z.dtype),

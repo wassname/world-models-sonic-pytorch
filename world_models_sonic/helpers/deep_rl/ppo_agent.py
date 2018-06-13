@@ -22,9 +22,12 @@ class PPOAgent(BaseAgent):
         self.total_steps = 0
         self.episode_rewards = np.zeros(config.num_workers)
         self.last_episode_rewards = np.zeros(config.num_workers)
+
+        # Get default values
         self.states = self.task.reset()
         self.states = config.state_normalizer(self.states)
-        self.hidden_states = None
+        self.hidden_states = self.network.default_hidden_state(self.network.tensor(self.states))
+        self.z_states = self.network.process_obs(self.states, hidden_states=self.hidden_states)
 
     def process_rollout(self, rollout, pending_value):
         config = self.config
@@ -53,13 +56,15 @@ class PPOAgent(BaseAgent):
     def iteration(self):
         config = self.config
         rollout = []
+        world_model_rollout = []
         states = self.states
+        z_states = self.z_states
         hidden_states = self.hidden_states
         steps = config.rollout_length * config.num_workers
 
         for _ in range(config.rollout_length):
             with torch.no_grad():
-                actions, log_probs, _, values, hidden_states = self.network.predict(states, hidden_states=hidden_states)
+                actions, log_probs, _, values, next_hidden_states = self.network.predict(z_states, hidden_states=hidden_states)
             next_states, rewards, terminals, _ = self.task.step(actions.cpu().detach().numpy())
             self.episode_rewards += rewards
             rewards = config.reward_normalizer(rewards[:, None])[:, 0]
@@ -68,31 +73,50 @@ class PPOAgent(BaseAgent):
                     self.last_episode_rewards[i] = self.episode_rewards[i]
                     self.episode_rewards[i] = 0
             next_states = config.state_normalizer(next_states)
+            next_z_states = self.network.process_obs(next_states, hidden_states=next_hidden_states)
+
+            # Store values
             rollout.append([
-                self.network.tensor(states),
+                z_states,
                 values.detach(),
                 actions.detach(),
                 log_probs.detach(),
                 self.network.tensor(rewards).unsqueeze(1),
                 self.network.tensor(1 - terminals).unsqueeze(1),
+                next_z_states,
+                hidden_states.detach()
+            ])
+            world_model_rollout.append([
+                self.network.tensor(states),
+                actions.detach(),
                 self.network.tensor(next_states),
                 hidden_states.detach()
             ])
-            states = next_states
 
-        _, _, _, pending_value, hidden_states = self.network.predict(states, hidden_states=hidden_states)
-        rollout.append([states, pending_value, None, None, None, None, hidden_states])
+            # Store for next step
+            z_states = next_z_states
+            states = next_states
+            hidden_states = next_hidden_states
+
+        # Save next values, since we will need them to compute next_obs and advantages
+        actions, _, _, pending_value, _ = self.network.predict(z_states, hidden_states=hidden_states)
+        rollout.append([z_states, pending_value, None, None, None, None, hidden_states])
+        world_model_rollout.append([states, actions, None, hidden_states])
+
+        # Save state/hidden_state for next iteration
         self.states = states
+        self.z_states = z_states
         self.hidden_states = hidden_states.detach()
 
         if config.train_world_model:
-            # TODO it might be good to encode all the states here, that avoid doing it multiple times during each PPO epoch
+            # Let's train the world model on rollouts, and also encode the observation
+            # We stack rollouts into (seq_len, batch_size, ..) that way the mdn-rnn get's a sequence when processing a rollout
+            states, actions, next_states, hidden_states = map(lambda x: torch.stack(x, dim=1), zip(*world_model_rollout[:-1]))
 
-            # Train world model on rollouts, that way the mdn-rnn get's a sequence
-            # Stack rollouts into (seq_len, batch_size, ..)
-            states, value, actions, log_probs, rewards, terminals, next_states, hidden_states = map(lambda x: torch.stack(x, dim=1), zip(*rollout[:-1]))
-            instrinsic = self.network.tensor(np.zeros(states.size(0)))
-            extrinsic = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+            if config.curiosity:
+                instrinsic = self.network.tensor(np.zeros(states.size(0)))
+                extrinsic = torch.cat([roll[4] for roll in rollout[:-1]]).mean()
+
             batcher = Batcher(config.world_model_batch_size, [np.arange(states.size(0))])
             batcher.shuffle()
             while not batcher.end():
@@ -103,12 +127,13 @@ class PPOAgent(BaseAgent):
                 sampled_next_states = next_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                _, _, _, initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+                initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+
                 if config.curiosity:
                     # Train world model here and update values with curiosity reward, before we calculate advantages
                     # For an intro to the idea see :https://arxiv.org/abs/1705.05363 . But my approach is to make the reward
                     # the reduction of loss from a state, similar to mentioned here http://people.idsia.ch/~juergen/creativity.html
-                    _, _, _, loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+                    loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
                     loss = loss.view((config.world_model_batch_size, -1))
                     initial_loss = initial_loss.view((config.world_model_batch_size, -1))
                     intrinsic_rewards = initial_loss - loss
@@ -124,8 +149,8 @@ class PPOAgent(BaseAgent):
                             else:
                                 rollout[j][4][k] += intrinsic_reward[j].detach()
 
-            # Log
             if config.curiosity:
+                # Log curiosity
                 extrinsic_after = torch.cat([roll[4] for roll in rollout[:-1]])
                 if config.curiosity_only:
                     instrinsic = extrinsic_after
@@ -145,7 +170,7 @@ class PPOAgent(BaseAgent):
                     ))
 
         # Calculate advantages again now that we have changed the rewards
-        states, actions, log_probs_old, returns, advantages, next_states, hidden_states = self.process_rollout(rollout, pending_value)
+        z_states, actions, log_probs_old, returns, advantages, next_z_states, hidden_states = self.process_rollout(rollout, pending_value)
 
         # Now train PPO
         batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
@@ -154,15 +179,15 @@ class PPOAgent(BaseAgent):
             while not batcher.end():
                 batch_indices = batcher.next_batch()[0]
                 batch_indices = self.network.tensor(batch_indices).long()
-                sampled_states = states[batch_indices]
+                sampled_z_states = z_states[batch_indices]
                 sampled_actions = actions[batch_indices]
                 sampled_log_probs_old = log_probs_old[batch_indices]
                 sampled_returns = returns[batch_indices]
                 sampled_advantages = advantages[batch_indices]
-                sampled_next_states = next_states[batch_indices]
+                sampled_next_z_states = next_z_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                _, log_probs, entropy_loss, values, _ = self.network.predict(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states)
+                _, log_probs, entropy_loss, values, _ = self.network.predict(sampled_z_states, sampled_actions, sampled_next_z_states, sampled_hidden_states)
                 ratio = (log_probs - sampled_log_probs_old).exp()
                 obj = ratio * sampled_advantages
                 obj_clipped = ratio.clamp(1.0 - self.config.ppo_ratio_clip,
