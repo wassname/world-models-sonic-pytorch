@@ -130,12 +130,17 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         # MDNRNN forward to get next hidden state (now that we have the action)
         with torch.no_grad():
             z = obs_z[:, :self.world_model.mdnrnn.z_dim]
-            pi, mu, sigma, hidden_states = self.world_model.mdnrnn.forward(z[:, None], action[:, None].detach(), hidden_state=hidden_states)
+            logpi, mu, logsigma, hidden_states = self.world_model.mdnrnn.forward(z[:, None], action[:, None].detach(), hidden_state=hidden_states)
             hidden_states = self.pad_hidden_states(hidden_states[-self.max_hidden_states:]).detach()
 
         if is_rollout and self._render:
             # Save for visualizing
-            z_next = self.world_model.mdnrnn.sample(pi, mu, sigma)
+
+            # try visualizing in test mode
+            self.world_model.mdnrnn.eval()
+            z_next = self.world_model.mdnrnn.sample(logpi, mu, logsigma)
+            self.world_model.mdnrnn.train()
+
             z_next = z_next.squeeze(1)
             action_pred = F.softmax(self.world_model.finv(z, z_next), 1)
 
