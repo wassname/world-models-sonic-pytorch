@@ -173,7 +173,7 @@ class PPOAgent(BaseAgent):
         z_states, actions, log_probs_old, returns, advantages, next_z_states, hidden_states = self.process_rollout(rollout, pending_value)
 
         # Now train PPO
-        batcher = Batcher(states.size(0) // config.num_mini_batches, [np.arange(states.size(0))])
+        batcher = Batcher(z_states.size(0) // config.num_mini_batches, [np.arange(z_states.size(0))])
         for _ in range(config.optimization_epochs):
             batcher.shuffle()
             while not batcher.end():
