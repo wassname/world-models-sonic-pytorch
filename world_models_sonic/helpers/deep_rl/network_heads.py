@@ -10,10 +10,10 @@ import cv2
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.distributions.utils import clamp_probs
 import numpy as np
 from deep_rl.network.network_utils import BaseNet
 from deep_rl.network.network_heads import ActorCriticNet
-
 
 class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
     """
@@ -72,6 +72,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         hidden_states = [h[None, :] for h in hidden_states[:, 0].transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
 
         if train:
+            self.network.world_model.train()
             z_next, z, hidden_states, info = self.world_model.forward_train(
                 obs.detach(),
                 action.detach(),
@@ -79,6 +80,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 hidden_states
             )
         else:
+            self.network.world_model.eval()
             with torch.no_grad():
                 z_next, z, hidden_states, info = self.world_model.forward_train(
                     obs.detach(),
@@ -90,6 +92,8 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         return info['loss'].detach()
 
     def process_obs(self, obs, hidden_states):
+        """Process an observation using the world model."""
+        self.world_model.eval()  # Sample without noise during rollout
         self.img = obs  # For rendering
         obs = self.tensor(obs).transpose(1, 3).contiguous()
 
@@ -107,6 +111,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         return obs_z
 
     def predict(self, obs_z, action=None, next_obs_z=None, hidden_states=None):
+        self.world_model.eval()  # Sample without noise during rollout
         # In rollout (non training mode) when no next_obs is provided
         is_rollout = next_obs_z is None
 
@@ -152,9 +157,12 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
             self.action_prob = action_pred.max(-1)[0].data
             self.render()
 
+        self.world_model.train()
+
         return action, log_prob, entropy, value, hidden_states
 
     def render(self, mode='world_model', close=False):
+        """Render training state using pyglet."""
         if close:
             for viewer in [self.viewer_z, self.viewer_z_next, self.viewer_img_z, self.viewer_img_z_next]:
                 viewer.close()
