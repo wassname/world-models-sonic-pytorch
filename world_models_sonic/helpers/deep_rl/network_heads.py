@@ -72,7 +72,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         hidden_states = [h[None, :] for h in hidden_states[:, 0].transpose(1, 0).contiguous().detach()] if hidden_states is not None else None
 
         if train:
-            self.network.world_model.train()
+            self.world_model.train()
             z_next, z, hidden_states, info = self.world_model.forward_train(
                 obs.detach(),
                 action.detach(),
@@ -80,7 +80,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 hidden_states
             )
         else:
-            self.network.world_model.eval()
+            self.world_model.eval()
             with torch.no_grad():
                 z_next, z, hidden_states, info = self.world_model.forward_train(
                     obs.detach(),
