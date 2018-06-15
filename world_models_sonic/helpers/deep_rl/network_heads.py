@@ -123,7 +123,8 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
         value = self.network.fc_critic(phi_v)
         action_logits = self.network.fc_action(phi_a)
         action_dist = torch.distributions.Categorical(logits=action_logits)
-        action = action_dist.sample()
+        if action is None:
+            action = action_dist.sample()
         log_prob = action_dist.log_prob(action).unsqueeze(-1)
         entropy = action_dist.entropy().unsqueeze(-1)
 
