@@ -33,11 +33,11 @@ def run_iterations(agent, log_dir):
         history['loss_inv'].append(agent.network.world_model.last_loss_inv)
         t0 = time.time()
         if iteration % config.iteration_log_interval == 0:
-            msg1 = '\n  steps: {}, steps/s: {:2.2f}'.format(
+            msg1 = 'steps: {}, steps/s: {:2.2f}'.format(
                 agent.total_steps,
                 np.mean(history['times'][-500:]),
             )
-            msg2 = '\n  world model losses: loss={loss:2.2f} loss_rnn={loss_mdn:2.2f}, loss_inv= {loss_inv2:2.2f}={lambda_finv:2.2f} * {loss_inv:2.2f}, loss_vae={loss_vae:2.2f}={lambda_vae:2.2f} * ({loss_recon:2.2f} + {lambda_vae_kld:2.2f} * {loss_KLD:2.2f})'.format(
+            msg2 = '\n  world model losses: {loss:2.4f} rnn={loss_mdn:2.4f}, inv= {loss_inv2:2.4f}={lambda_finv:2.4f} * {loss_inv:2.4f}, vae={loss_vae:2.4f}={lambda_vae:2.4f} * ({loss_recon:2.4f} + {lambda_vae_kld:2.4f} * {loss_KLD:2.4f})'.format(
                 loss=np.mean(history['loss'][-500:]),
                 loss_mdn=np.mean(history['loss_mdn'][-500:]),
                 loss_recon=np.mean(history['loss_recon'][-500:]),
@@ -62,7 +62,7 @@ def run_iterations(agent, log_dir):
                 np.max(history['rewards'][-500:]),
                 len(history['rewards'][-500:])
             )
-            config.logger.info(msg1 + msg2 + msg3 + msg4)
+            config.logger.info(msg1 + msg2 + msg3 + msg4+'\n')
         if iteration % (config.iteration_log_interval * 100) == 0:
             with open('%s/stats-%s-%s-online-stats-%s.pkl' % (log_dir, agent_name, config.tag, agent.task.name), 'wb') as f:
                 pickle.dump({'rewards': history['rewards'],

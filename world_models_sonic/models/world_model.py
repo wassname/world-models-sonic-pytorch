@@ -24,6 +24,7 @@ class WorldModel(torch.nn.modules.Module):
         self.last_loss_recon = 0
         self.last_loss_mdn = 0
         self.last_loss_inv = 0
+        self.last_loss = 0
 
     def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
         batch_size = X.size(0)
