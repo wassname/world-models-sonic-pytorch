@@ -81,7 +81,6 @@ class MDNRNN(nn.Module):
         # you init the state to some constant value
         # https://www.cs.toronto.edu/~hinton/csc2535/notes/lec10new.pdf
         batch_size = z.size(0)
-        seq_len = z.size(1)
         cuda = z.is_cuda
         hidden_state = (
             torch.zeros((1, batch_size, self.hidden_size), dtype=z.dtype),
@@ -126,7 +125,7 @@ class MDNRNN(nn.Module):
     def get_mixture_coef(self, output):
         batch_size, seq_len, _ = output.size()
         # N, seq_len, n_mixture * z_dim * 2 + n_mixture
-        output = output.contiguous()
+        # output = output.contiguous()
         output = output.view(-1, self.hidden_size)
 
         mixture = self.mdn(output)
@@ -141,14 +140,14 @@ class MDNRNN(nn.Module):
 
         # Reshape
         mu = mu.view((-1, seq_len, self.n_mixture, self.z_dim))
-        logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(np.log(eps), -np.log(eps))
+        logsigma = logsigma.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(logeps, -logeps)
         logpi = logpi.view((-1, seq_len, self.n_mixture, self.z_dim)).clamp(logeps, -logeps)
 
         # A stable log domain softmax
         logpi = F.log_softmax(logpi, 2)  # Weights over n_mixtures should sum to one
 
         # add temperature
-        if self.tau > 0:
+        if (self.tau > 0) and self.training:
             logpi -= torch.log(self.tau)
             logsigma += torch.log(self.tau ** 0.5)
 
@@ -176,11 +175,13 @@ class MDNRNN(nn.Module):
             assert ((logpi.sum(axis) - 1) < 0.01).all(), 'pi should be softmaxed along axis'
         axis_size = logpi.size(axis)
         logpi = logpi.transpose(axis, 3).contiguous()
-        logpi_flat = logpi.view(-1, axis_size).clamp(1e-7)
+        logpi_flat = logpi.view(-1, axis_size)  # .clamp(1e-7)
         if debug:
             assert ((logpi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
+
         # sample
         k = torch.distributions.Multinomial(1, logpi_flat).sample()
+
         # reshape back
         k = k.view(*logpi.size()).transpose(axis, 3).contiguous()
         if debug:
@@ -194,6 +195,7 @@ class MDNRNN(nn.Module):
         k = self.multinomial_on_axis(logpi.exp(), axis=2)
         mu = (mu * k).sum(2)
         sigma = (logsigma.exp() * k).sum(2)
+
         # Sample from the distribution
         z_normals = torch.distributions.Normal(mu, sigma)
         if self.training:
@@ -204,7 +206,7 @@ class MDNRNN(nn.Module):
             assert_finite(z_sample)
         return z_sample
 
-    def rnn_r_loss(self, y_true, logpi, mu, logsigma):
+    def rnn_loss(self, y_true, logpi, mu, logsigma):
         # see https://github.com/hardmaru/WorldModelsExperiments/blob/c0cb2dee69f4b05d9494bc0263eca25a7f90d555/carracing/rnn/rnn.py#L139
         #     https://github.com/hardmaru/pytorch_notebooks/blob/master/mixture_density_networks.ipynb
         #     https://github.com/AppliedDataSciencePartners/WorldModels/blob/master/rnn/arch.py#L39
@@ -214,7 +216,8 @@ class MDNRNN(nn.Module):
         y_true = y_true.unsqueeze(2).repeat((1, 1, self.n_mixture, 1))
         # probability shape [batch, seq, num_mixtures, z_dim]
         logprob = lognormal(y_true, mu, logsigma).clamp(logeps, -logeps)
-        v = logpi + logprob
+        # Weighted sum over mixtures.
+        v = logpi + logprob  # Weight by pi. Same as log(pi*prob) using log rule
         loss = -logsumexp(v, dim=2, keepdim=True)
 
         # mean over seq and z dim and num_mixtures
@@ -224,7 +227,3 @@ class MDNRNN(nn.Module):
         # it's approaching `log(eps)`` E.g. `log(1e-7)=-16.12`. So let's shift it to approach zero from above.
         loss -= np.log(eps)
         return loss
-
-    def rnn_loss(self, y_true, logpi, mu, logsigma):
-        r_loss = self.rnn_r_loss(y_true, logpi, mu, logsigma)
-        return r_loss
