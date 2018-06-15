@@ -127,7 +127,11 @@ class PPOAgent(BaseAgent):
                 sampled_next_states = next_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+                # Get initial loss in deterministic mode
+                initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+
+                # Train
+                _ = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
 
                 if config.curiosity:
                     # Train world model here and update values with curiosity reward, before we calculate advantages
