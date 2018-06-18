@@ -148,8 +148,8 @@ class MDNRNN(nn.Module):
 
         # add temperature
         if (self.tau > 0) and self.training:
-            logpi -= torch.log(self.tau)
-            logsigma += torch.log(self.tau ** 0.5)
+            logpi = logpi - np.log(self.tau)
+            logsigma = logsigma + np.log(self.tau ** 0.5)
 
         if debug:
             assert_finite(logpi)
