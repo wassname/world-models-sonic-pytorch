@@ -1,5 +1,7 @@
 # world-models-sonic-pytorch
 
+https://github.com/wassname/world-models-sonic-pytorch
+
 My attempt to implementing an unsupervised dynamics model with ideas from a few papers
 - ["World Models"](https://arxiv.org/abs/1803.10122)
 - ["MERLIN "or "Unsupervised Predictive Memory in a Goal-Directed Agent"](https://arxiv.org/abs/1803.10760 )
@@ -8,7 +10,9 @@ My attempt to implementing an unsupervised dynamics model with ideas from a few 
 
 I use a dynamics model, an inverse model, and a VAE. For the controller I use Proximal Policy Optimization (PPO). I also use a form of Curiosity as an axillary reward.
 
-The end result was a score of 2337/9000 and place ~149 on the leaderboard to the [openai retro competition](https://contest.openai.com/).
+The end result was a score of 2337/9000 and place ~149 on the leaderboard to the [OpenAI Retro Content](https://contest.openai.com/). This is the score you can get from constantly running and jumping to the right, sometimes at the right times. So while it shows some interesting behaviour it's far from the median score of ~4000 or the top score of 6000.
+
+If anyone find the reason why this isn't converging please let me know, I've rewritten it and tried many things but perhaps Sonic is just to complex for world models.
 
 ![](docs/img/visualization.gif)
 
@@ -73,7 +77,17 @@ Overall it can take quite a small learning rate to train multiple network simult
 
 I haven't found optimal setting for these but you can leave the settings at default values.
 
+## Gradient clipping
+
+Too low and all your updates get normalized to look the same, so even when there is a lot to learn you model learns the same amount from suprising and unsuprising batches. Set it too large and outliers will update your model too far off track. To set this you should look at the variable "grad_norm" which is logged in tensorboard. You can set the value to something between the mean and the maximum values you observe. This depends heavily on reward scaling, model archetecture, and model convergance. Ideally this hyperparamer would be removed and the value would instead be calibrated by a moving average of gradient norms but I haven't seen anyone do this yet.
+
 ### Misc
 
-- The controller can't learn much untill you freeze or drastically slow the world-model learning (lr<<1e-5)
--
+- The controller can't learn much untill you freeze or drastically slow the world-model learning (lr<<1e-5) (TODO confirm this on recent code)
+- PPO mini batch size should be higher than normal (20+) or it may not learn (supported by https://arxiv.org/abs/1804.03720)
+
+# Details
+
+- Author: wassname <world-models-sonic-pytorch at wassname dot org>
+- Date: 20180606
+- Url: https://github.com/wassname/world-models-sonic-pytorch
