@@ -192,16 +192,28 @@ class MDNRNN(nn.Module):
     def sample(self, logpi, mu, logsigma):
         """Sample z from Z."""
         # Select the sampled distribution
-        k = self.multinomial_on_axis(logpi.exp(), axis=2)
-        mu = (mu * k).sum(2)
-        sigma = (logsigma.exp() * k).sum(2)
+        # Do we select before sampling?
+        # k = self.multinomial_on_axis(logpi.exp(), axis=2)
+        # mu = (mu * k).sum(2)
+        # sigma = (logsigma.exp() * k).sum(2)
 
-        # Sample from the distribution
-        z_normals = torch.distributions.Normal(mu, sigma)
+        # Or mix before samping?
+        # mu = (mu * logpi.exp()).sum(2)
+        # sigma = (logsigma.exp() * logpi.exp()).sum(2)
+        #
+        # # Sample from the distribution
+        # z_normals = torch.distributions.Normal(mu, sigma)
+        # if self.training:
+        #     z_sample = z_normals.rsample()
+        # else:
+        #     z_sample = z_normals.sample()
+
+        # Or neither?
         if self.training:
-            z_sample = z_normals.rsample()
+            z_sample = torch.sum(logpi.exp() * torch.normal(mu, logsigma.exp()), dim=2)
         else:
-            z_sample = z_normals.sample()
+            z_sample = torch.sum(logpi.exp() * mu, dim=2)
+
         if debug:
             assert_finite(z_sample)
         return z_sample
