@@ -7,6 +7,7 @@
 import torch
 from torch import nn
 import numpy as np
+import collections
 
 from deep_rl.agent import BaseAgent, Batcher
 
@@ -29,6 +30,8 @@ class PPOAgent(BaseAgent):
         self.hidden_states = self.network.default_hidden_state(self.network.tensor(self.states))
         self.z_states = self.network.process_obs(self.states, hidden_states=self.hidden_states)
 
+        self.last_info_world_model = None
+
     def process_rollout(self, rollout, pending_value):
         config = self.config
         processed_rollout = [None] * (len(rollout) - 1)
@@ -45,13 +48,13 @@ class PPOAgent(BaseAgent):
                 td_error = rewards + config.discount * terminals * next_value.detach() - value.detach()
                 advantages = advantages * config.gae_tau * config.discount * terminals + td_error
 
-            processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states]
+            processed_rollout[i] = [states, actions, log_probs, returns, advantages, next_states, hidden_states, value]
 
         # Concat the rollout vars
-        states, actions, log_probs_old, returns, advantages, next_states, hidden_states = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
+        states, actions, log_probs_old, returns, advantages, next_states, hidden_states, values = map(lambda x: torch.cat(x, dim=0), zip(*processed_rollout))
 
         advantages = (advantages - advantages.mean()) / advantages.std()
-        return states, actions, log_probs_old, returns, advantages, next_states, hidden_states
+        return states, actions, log_probs_old, returns, advantages, next_states, hidden_states, values
 
     def iteration(self):
         config = self.config
@@ -128,16 +131,21 @@ class PPOAgent(BaseAgent):
                 sampled_hidden_states = hidden_states[batch_indices]
 
                 # Get initial loss in deterministic mode
-                initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+                if config.curiosity:
+                    initial_loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)['loss']
 
                 # Train
-                _ = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+                info_world_model = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=True)
+                self.last_info_world_model = info_world_model
+                # Log
+                for key, val in info_world_model.items():
+                    config.logger.scalar_summary(key, val.mean())
 
                 if config.curiosity:
                     # Train world model here and update values with curiosity reward, before we calculate advantages
                     # For an intro to the idea see :https://arxiv.org/abs/1705.05363 . But my approach is to make the reward
                     # the reduction of loss from a state, similar to mentioned here http://people.idsia.ch/~juergen/creativity.html
-                    loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)
+                    loss = self.network.train_world_model(sampled_states, sampled_actions, sampled_next_states, sampled_hidden_states, train=False)['loss']
                     loss = loss.view((config.world_model_batch_size, -1))
                     initial_loss = initial_loss.view((config.world_model_batch_size, -1))
                     intrinsic_rewards = initial_loss - loss
@@ -146,7 +154,7 @@ class PPOAgent(BaseAgent):
                     for i, k in enumerate(batch_indices):
                         intrinsic_reward = config.intrinsic_reward_normalizer(intrinsic_rewards[i].cpu().numpy()[:, None])[:, 0]
                         intrinsic_reward = (intrinsic_reward - config.curiosity_boredom) * config.curiosity_weight
-                        intrinsic_reward = self.network.tensor(intrinsic_reward).clamp(0)
+                        intrinsic_reward = self.network.tensor(intrinsic_reward)
                         for j in range(len(intrinsic_reward)):
                             if config.curiosity_only:
                                 rollout[j][4][k] = intrinsic_reward[j].detach()
@@ -163,7 +171,7 @@ class PPOAgent(BaseAgent):
 
                 config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
                 config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
-                if (self.total_steps // steps) % 20 == 0:
+                if (self.total_steps // steps) % config.iteration_log_interval == 0:
                     config.logger.info('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
                         extrinsic.min().cpu().item(),
                         extrinsic.mean().cpu().item(),
@@ -173,46 +181,77 @@ class PPOAgent(BaseAgent):
                         instrinsic.max().cpu().item()
                     ))
 
+            del states, actions, next_states, hidden_states
+
         # Calculate advantages again now that we have changed the rewards
-        z_states, actions, log_probs_old, returns, advantages, next_z_states, hidden_states = self.process_rollout(rollout, pending_value)
+        z_states, actions, log_probs_old, returns, advantages, next_z_states, hidden_states, values_old = self.process_rollout(rollout, pending_value)
 
         # Now train PPO
         batcher = Batcher(z_states.size(0) // config.num_mini_batches, [np.arange(z_states.size(0))])
         for _ in range(config.optimization_epochs):
             batcher.shuffle()
             while not batcher.end():
+                # Sample rollout
                 batch_indices = batcher.next_batch()[0]
                 batch_indices = self.network.tensor(batch_indices).long()
                 sampled_z_states = z_states[batch_indices]
                 sampled_actions = actions[batch_indices]
                 sampled_log_probs_old = log_probs_old[batch_indices]
                 sampled_returns = returns[batch_indices]
+                sampled_old_values = values_old[batch_indices]
                 sampled_advantages = advantages[batch_indices]
                 sampled_next_z_states = next_z_states[batch_indices]
                 sampled_hidden_states = hidden_states[batch_indices]
 
-                _, log_probs, entropy_loss, values, _ = self.network.predict(sampled_z_states, sampled_actions, sampled_next_z_states, sampled_hidden_states)
+                # Train controller
+                _, log_probs, entropy, values, _ = self.network.predict(sampled_z_states, sampled_actions, sampled_next_z_states, sampled_hidden_states)
                 ratio = (log_probs - sampled_log_probs_old).exp()
                 obj = ratio * sampled_advantages
                 obj_clipped = ratio.clamp(1.0 - self.config.ppo_ratio_clip,
                                           1.0 + self.config.ppo_ratio_clip) * sampled_advantages
                 policy_loss = -torch.min(obj, obj_clipped).mean()
-                entropy_loss = - config.entropy_weight * entropy_loss.mean()
+                entropy_loss = - config.entropy_weight * entropy.mean()
 
-                value_loss = 0.5 * (sampled_returns - values).pow(2).mean()
+                # # Do the values with importance sampling, like in https://github.com/openai/baselines/blob/24fe3d65/baselines/ppo2/ppo2.py#L149
+                values_clipped = sampled_old_values + (values - sampled_old_values).clamp(- config.ppo_ratio_clip, config.ppo_ratio_clip)
+                vf_losses1 = (values - sampled_returns).pow(2)
+                vf_losses2 = (values_clipped - sampled_returns).pow(2)
+                value_loss = 0.5 * torch.max(vf_losses1, vf_losses2).mean()
+                #
+                # value_loss = 0.5 * (sampled_returns - values).pow(2).mean()
+                loss = (policy_loss + value_loss * config.value_weight + entropy_loss).mean()
 
+                # Backward
                 self.opt.zero_grad()
-                loss = (policy_loss + value_loss + entropy_loss)
                 loss.backward()
                 grad_norm = nn.utils.clip_grad_norm_(self.network.parameters(), config.gradient_clip)
                 self.opt.step()
 
+                # Log values from training minibatch
                 config.logger.scalar_summary('loss_value', value_loss)
                 config.logger.scalar_summary('loss_policy', policy_loss)
-                config.logger.scalar_summary('loss_entropy', entropy_loss)
-                config.logger.scalar_summary('grad_norm', grad_norm)
-                config.logger.scalar_summary('ratio', ratio.mean())
-                config.logger.scalar_summary('sampled_returns', sampled_returns.mean())
-        config.logger.writer.file_writer.flush()
+                config.logger.scalar_summary('loss_entropy', entropy_loss)  # Lets us tune/check config.entropy_weight
+                config.logger.scalar_summary('grad_norm', grad_norm)  # Lets us check config.gradient_clip
+                # config.logger.scalar_summary('ratio_max', ratio.max())
+                # config.logger.scalar_summary('ratio_min', ratio.min())
+                config.logger.scalar_summary('abs_ratio_mean', (ratio - 1).abs().mean())
+                config.logger.scalar_summary('ratio_mean', (ratio - 1).mean())
+                config.logger.scalar_summary('abs_ratio_max', (ratio - 1).abs().max())
+                # config.logger.scalar_summary('ratio', ratio.mean())
+                # Lets us check how important/relevant the training experience is. Lets us tune rollout size, optimizer_epochs, etc
 
+        del z_states, actions, log_probs_old, returns, advantages, next_z_states, hidden_states
+
+        # Log values from rollout
+        _, values, actions, log_probs, rewards, terminals, _, _ = map(lambda x: torch.stack(x, dim=1), zip(*rollout[:-1]))
+        if (self.total_steps // steps) % config.iteration_log_interval == 0:
+            config.logger.info('action counts: {}'.format(
+                dict(collections.Counter(actions.view(-1).cpu().numpy().tolist()))
+            ))
         self.total_steps += steps
+        config.logger.histo_summary('actions', actions, self.total_steps)  # How often it takes each action
+        config.logger.scalar_summary('terminals', terminals.mean(), self.total_steps)  # Lets us know how often it's dying
+        config.logger.scalar_summary('log_probs', log_probs.mean(), self.total_steps)  # How certain it is
+        config.logger.scalar_summary('rewards', rewards.mean(), self.total_steps)  # Raw reward
+
+        config.logger.writer.file_writer.flush()

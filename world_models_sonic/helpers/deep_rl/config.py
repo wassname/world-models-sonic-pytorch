@@ -15,3 +15,4 @@ class Config(_Config):
         self.curiosity_only = False
         self.curiosity_weight = 1
         self.curiosity_boredom = 0
+        self.value_weight = 0.5

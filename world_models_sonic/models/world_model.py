@@ -19,13 +19,6 @@ class WorldModel(torch.nn.modules.Module):
         self.lambda_loss = lambda_loss
         self.logger = logger
 
-        self.last_loss_vae = 0
-        self.last_loss_KLD = 0
-        self.last_loss_recon = 0
-        self.last_loss_mdn = 0
-        self.last_loss_inv = 0
-        self.last_loss = 0
-
     def forward_train(self, X, actions=None, X_next=None, hidden_state=None, test=False):
         batch_size = X.size(0)
         seq_len = X.size(1)
@@ -82,20 +75,5 @@ class WorldModel(torch.nn.modules.Module):
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-            self.last_loss = loss.mean().data.cpu().item()
-            self.last_loss_vae = loss_vae.mean().data.cpu().item()
-            self.last_loss_KLD = loss_KLD.mean().data.cpu().item()
-            self.last_loss_recon = loss_recon.mean().data.cpu().item()
-            self.last_loss_mdn = loss_mdn.mean().data.cpu().item()
-            self.last_loss_inv = loss_inv.mean().data.cpu().item()
-
-            # Record
-            if self.logger:
-                self.logger.scalar_summary('loss_vae', loss_vae.mean())
-                self.logger.scalar_summary('loss_recon', loss_recon.mean())
-                self.logger.scalar_summary('loss_KLD', loss_KLD.mean())
-                self.logger.scalar_summary('loss_mdn', loss_mdn.mean())
-                self.logger.scalar_summary('loss_inv', loss_inv.mean())
-                self.logger.scalar_summary('loss_world_model', loss.mean())
-
-        return z_next_pred.squeeze(1), z_obs.squeeze(1), hidden_state, {'loss': loss}
+        info = dict(loss_vae=loss_vae.detach(), loss=loss.detach(), loss_recon=loss_recon.detach(), loss_KLD=loss_KLD.detach(), loss_mdn=loss_mdn.detach(), loss_inv=loss_inv.detach())
+        return z_next_pred.squeeze(1), z_obs.squeeze(1), hidden_state, info

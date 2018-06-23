@@ -25,31 +25,31 @@ def run_iterations(agent, log_dir):
         history['steps'].append(agent.total_steps - steps0)
         history['rewards'] += agent.last_episode_rewards.tolist()
         history['times'].append(history['steps'][-1] / (time.time() - t0))
-        history['loss'].append(agent.network.world_model.last_loss)
-        history['loss_vae'].append(agent.network.world_model.last_loss_vae)
-        history['loss_KLD'].append(agent.network.world_model.last_loss_KLD)
-        history['loss_recon'].append(agent.network.world_model.last_loss_recon)
-        history['loss_mdn'].append(agent.network.world_model.last_loss_mdn)
-        history['loss_inv'].append(agent.network.world_model.last_loss_inv)
+        if agent.last_info_world_model:
+            for key, val in agent.last_info_world_model.items():
+                history[key].append(val.mean().cpu().item())
         t0 = time.time()
         if iteration % config.iteration_log_interval == 0:
             msg1 = 'steps: {}, steps/s: {:2.2f}'.format(
                 agent.total_steps,
                 np.mean(history['times'][-500:]),
             )
-            msg2 = '\n  world model losses: {loss:2.4f} rnn={loss_mdn:2.4f}, inv= {loss_inv2:2.4f}={lambda_finv:2.4f} * {loss_inv:2.4f}, vae={loss_vae:2.4f}={lambda_vae:2.4f} * ({loss_recon:2.4f} + {lambda_vae_kld:2.4f} * {loss_KLD:2.4f})'.format(
-                loss=np.mean(history['loss'][-500:]),
-                loss_mdn=np.mean(history['loss_mdn'][-500:]),
-                loss_recon=np.mean(history['loss_recon'][-500:]),
-                loss_KLD=np.mean(history['loss_KLD'][-500:]),
-                loss_vae=agent.network.world_model.lambda_vae *
-                (np.mean(history['loss_recon'][-500:]) + agent.network.world_model.lambda_vae_kld * np.mean(history['loss_KLD'][-500:])),
-                loss_inv=np.mean(history['loss_inv'][-500:]),
-                loss_inv2=np.mean(history['loss_inv'][-500:]) * agent.network.world_model.lambda_finv,
-                lambda_vae_kld=agent.network.world_model.lambda_vae_kld,
-                lambda_finv=agent.network.world_model.lambda_finv,
-                lambda_vae=agent.network.world_model.lambda_vae,
-            )
+            if agent.last_info_world_model:
+                msg2 = '\n  world model losses: {loss:2.4f} rnn={loss_mdn:2.4f}, inv= {loss_inv2:2.4f}={lambda_finv:2.4f} * {loss_inv:2.4f}, vae={loss_vae:2.4f}={lambda_vae:2.4f} * ({loss_recon:2.4f} + {lambda_vae_kld:2.4f} * {loss_KLD:2.4f})'.format(
+                    loss=np.mean(history['loss'][-500:]),
+                    loss_mdn=np.mean(history['loss_mdn'][-500:]),
+                    loss_recon=np.mean(history['loss_recon'][-500:]),
+                    loss_KLD=np.mean(history['loss_KLD'][-500:]),
+                    loss_vae=agent.network.world_model.lambda_vae *
+                    (np.mean(history['loss_recon'][-500:]) + agent.network.world_model.lambda_vae_kld * np.mean(history['loss_KLD'][-500:])),
+                    loss_inv=np.mean(history['loss_inv'][-500:]),
+                    loss_inv2=np.mean(history['loss_inv'][-500:]) * agent.network.world_model.lambda_finv,
+                    lambda_vae_kld=agent.network.world_model.lambda_vae_kld,
+                    lambda_finv=agent.network.world_model.lambda_finv,
+                    lambda_vae=agent.network.world_model.lambda_vae,
+                )
+            else:
+                msg2=''
             msg3 = '\n  epoch reward:       %2.4f/%2.4f/%2.4f [n=%d] (min/mean/max)' % (
                 np.min(agent.last_episode_rewards),
                 np.mean(agent.last_episode_rewards),
