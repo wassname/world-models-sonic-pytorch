@@ -15,6 +15,7 @@ import numpy as np
 from deep_rl.network.network_utils import BaseNet
 from deep_rl.network.network_heads import ActorCriticNet
 
+
 class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
     """
     A custom network head with world models and rendering.
@@ -89,7 +90,7 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                     hidden_states,
                     test=True
                 )
-        return info['loss'].detach()
+        return info
 
     def process_obs(self, obs, hidden_states):
         """Process an observation using the world model."""
@@ -215,23 +216,23 @@ class CategoricalWorldActorCriticNet(nn.Module, BaseNet):
                 img_z = self.world_model.vae.decode(zv)
                 img_z_next = self.world_model.vae.decode(zv_next)
 
-                last_stacked_image = True
+                # last_stacked_image = True
                 # to numpy images
                 img_z = img_z.squeeze(0).transpose(0, 2)
-                img_z = img_z.view((img_z.size(0), img_z.size(1), 3, 4))  # Reshape into (batch, channels, width, height, stacked_frames)
-                if last_stacked_image:
-                    img_z = img_z[:, :, :, -1]
-                else:
-                    img_z = img_z.mean(-1)
+                img_z = img_z.view((img_z.size(0), img_z.size(1), 3))  # , 4))  # Reshape into (batch, channels, width, height, stacked_frames)
+                # if last_stacked_image:
+                #     img_z = img_z[:, :, :, -1]
+                # else:
+                #     img_z = img_z.mean(-1)
                 img_z = img_z.data.cpu().numpy()
                 img_z = (img_z * 255.0).astype(np.uint8)
 
                 img_z_next = img_z_next.squeeze(0).transpose(0, 2).clamp(0, 1)
-                img_z_next = img_z_next.view((img_z_next.size(0), img_z_next.size(1), 3, 4))
-                if last_stacked_image:
-                    img_z_next = img_z_next[:, :, :, -1]
-                else:
-                    img_z_next = img_z_next.mean(-1)
+                img_z_next = img_z_next.view((img_z_next.size(0), img_z_next.size(1), 3))  # , 4))
+                # if last_stacked_image:
+                #     img_z_next = img_z_next[:, :, :, -1]
+                # else:
+                #     img_z_next = img_z_next.mean(-1)
                 img_z_next = img_z_next.data.cpu().numpy()
                 img_z_next = (img_z_next * 255.0).astype(np.uint8)
 
