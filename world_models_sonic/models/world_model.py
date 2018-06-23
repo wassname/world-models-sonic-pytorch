@@ -42,7 +42,7 @@ class WorldModel(torch.nn.modules.Module):
             z_obs = z_obs.cuda()
             z_obs_next = z_obs_next.cuda()
             actions = actions.cuda()
-        logpi, mu, logsigma, hidden_state = self.mdnrnn.forward(z_obs, actions, hidden_state=hidden_state)
+        logpi, mu, logsigma, hidden_state = self.mdnrnn.forward(z_obs.detach(), actions, hidden_state=hidden_state)
 
         # We are evaluating how the output distribution for the next step
         # matches the real next step. So we have to discard the last step in the
