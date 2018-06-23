@@ -1,3 +1,5 @@
+STATUS: This doesn't work well and neither did similar independent attempts. They all got ~2000 performance which is equivalent to learning to press right and occasionally jump. Applying this model to Sonic appears to be quite challenging, but may work on simpler games.
+
 # world-models-sonic-pytorch
 
 https://github.com/wassname/world-models-sonic-pytorch
@@ -10,9 +12,13 @@ My attempt to implementing an unsupervised dynamics model with ideas from a few 
 
 I use a dynamics model, an inverse model, and a VAE. For the controller I use Proximal Policy Optimization (PPO). I also use a form of Curiosity as an axillary reward.
 
-The end result was a score of 2337/9000 and place ~149 on the leaderboard to the [OpenAI Retro Content](https://contest.openai.com/). This is the score you can get from constantly running and jumping to the right, sometimes at the right times. So while it shows some interesting behaviour it's far from the median score of ~4000 or the top score of 6000.
+The end result was a score of 2337/9000 and place ~149 on the leader board to the [OpenAI Retro Content](https://contest.openai.com/). This is the score you can get from constantly running and jumping to the right, sometimes at the right times. So while it shows some interesting behavior it's far from the median score of ~4000 or the top score of 6000.
 
-If anyone find the reason why this isn't converging please let me know, I've rewritten it and tried many things but perhaps Sonic is just to complex for world models.
+Independent attempts to apply [world models](https://dylandjian.github.io/world-models/) ([and curiosity](https://flyyufelix.github.io/2018/06/11/sonic-rl.html)) to sonic got similar results [2](https://medium.com/@mrdbourke/the-world-model-of-a-hedgehog-6ff056a6dc7f). I believe this approach may not be well suited to the game.
+
+If you are trying to use and understand my code, I encourage you to check out [dylandjian's write up](ttps://dylandjian.github.io/world-models/) since he tried a world model’s approach, explained it well, and won "Best Write-up"!
+
+If anyone finds the reason why this isn't converging please let me know, I've rewritten it and tried many things but perhaps Sonic is just too complex for world models.
 
 ![](docs/img/visualization.gif)
 
@@ -80,6 +86,12 @@ I haven't found optimal setting for these but you can leave the settings at defa
 ## Gradient clipping
 
 Too low and all your updates get normalized to look the same, so even when there is a lot to learn you model learns the same amount from suprising and unsuprising batches. Set it too large and outliers will update your model too far off track. To set this you should look at the variable "grad_norm" which is logged in tensorboard. You can set the value to something between the mean and the maximum values you observe. This depends heavily on reward scaling, model archetecture, and model convergance. Ideally this hyperparamer would be removed and the value would instead be calibrated by a moving average of gradient norms but I haven't seen anyone do this yet.
+
+## Entropy weight
+
+Make sure the PPO entropy_loss doesn't go to ~0. This would mean the entropy loss isn't working, it's mean to punish the agent for being overly certain, and therefore keep it exploring. But a value at near zero (when compared to the policy_loss) means it's stopped exploring and has probobly got stuck in a local mixima such as always pressing right. If so increase your entropy_loss_weight by 10 and keep monitoring it. The potential decrease in the entropy_loss should be comparable to the policy_loss.
+
+For sonic I found this parameter was particularly important since there is a large false minima where it just presses right. So we need entropy weight to be higher than normal but not so high i can't vary it's actions without incurring a penalty. In the end 0.04 worked while 1 was too high and 0.01 was too low.
 
 ### Misc
 
