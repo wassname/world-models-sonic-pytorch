@@ -125,9 +125,9 @@ class MDNRNN(nn.Module):
     def get_mixture_coef(self, output):
         batch_size, seq_len, _ = output.size()
         # N, seq_len, n_mixture * z_dim * 2 + n_mixture
-        # output = output.contiguous()
-        output = output.view(-1, self.hidden_size)
+        output = output.contiguous().view(-1, self.hidden_size)
 
+        # Flatten so we treat the sequence dimension at batches for now
         mixture = self.mdn(output)
         mixture = mixture.view(batch_size, seq_len, -1)
 
@@ -180,7 +180,7 @@ class MDNRNN(nn.Module):
             assert ((logpi_flat.sum(-1) - 1) < 0.01).all(), 'should reshape the correct axis'
 
         # sample
-        k = torch.distributions.Multinomial(1, logpi_flat).sample()
+        k = torch.distributions.Multinomial(1, logits=logpi_flat).sample()
 
         # reshape back
         k = k.view(*logpi.size()).transpose(axis, 3).contiguous()
