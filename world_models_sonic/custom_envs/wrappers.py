@@ -144,7 +144,7 @@ class RandomGameReset(gym.Wrapper):
             # Load
             choice = game_states.sample().iloc[0]
             state = choice.state + '.state'
-            logger.info('reseting to', game, state)
+            logger.info('reseting to %s %s', game, state)
             with gzip.open(os.path.join(game_path, state), 'rb') as fh:
                 self.env.unwrapped.initial_state = fh.read()
 
