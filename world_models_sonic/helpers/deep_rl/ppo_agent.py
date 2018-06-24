@@ -139,7 +139,7 @@ class PPOAgent(BaseAgent):
                 self.last_info_world_model = info_world_model
                 # Log
                 for key, val in info_world_model.items():
-                    config.logger.scalar_summary(key, val.mean())
+                    config.logger.scalar_summary('wm/' + key, val.mean())
 
                 if config.curiosity:
                     # Train world model here and update values with curiosity reward, before we calculate advantages
@@ -169,8 +169,8 @@ class PPOAgent(BaseAgent):
                 else:
                     instrinsic = extrinsic_after - extrinsic
 
-                config.logger.scalar_summary('reward_extrinsic', extrinsic.mean())
-                config.logger.scalar_summary('reward_intrinsic', instrinsic.mean())
+                config.logger.scalar_summary('curiosity/reward_extrinsic', extrinsic.mean())
+                config.logger.scalar_summary('curiosity/reward_intrinsic', instrinsic.mean())
                 if (self.total_steps // steps) % config.iteration_log_interval == 0:
                     config.logger.info('rollout extrinsic, intrinsic reward [min/mean/max]: {:2.4f}/{:2.4f}/{:2.4f}, {:2.4f}/{:2.4f}/{:2.4f}'.format(
                         extrinsic.min().cpu().item(),
@@ -228,15 +228,15 @@ class PPOAgent(BaseAgent):
                 self.opt.step()
 
                 # Log values from training minibatch
-                config.logger.scalar_summary('loss_value', value_loss)
-                config.logger.scalar_summary('loss_policy', policy_loss)
-                config.logger.scalar_summary('loss_entropy', entropy_loss)  # Lets us tune/check config.entropy_weight
-                config.logger.scalar_summary('grad_norm', grad_norm)  # Lets us check config.gradient_clip
+                config.logger.scalar_summary('ppo/loss_value', value_loss)
+                config.logger.scalar_summary('ppo/loss_policy', policy_loss)
+                config.logger.scalar_summary('ppo/loss_entropy', entropy_loss)  # Lets us tune/check config.entropy_weight
+                config.logger.scalar_summary('ppo/grad_norm', grad_norm)  # Lets us check config.gradient_clip
                 # config.logger.scalar_summary('ratio_max', ratio.max())
                 # config.logger.scalar_summary('ratio_min', ratio.min())
-                config.logger.scalar_summary('abs_ratio_mean', (ratio - 1).abs().mean())
-                config.logger.scalar_summary('ratio_mean', (ratio - 1).mean())
-                config.logger.scalar_summary('abs_ratio_max', (ratio - 1).abs().max())
+                config.logger.scalar_summary('ppo/ratio/abs_mean', (ratio - 1).abs().mean())
+                config.logger.scalar_summary('ppo/ratio/mean', (ratio - 1).mean())
+                config.logger.scalar_summary('ppo/ratio/abs_max', (ratio - 1).abs().max())
                 # config.logger.scalar_summary('ratio', ratio.mean())
                 # Lets us check how important/relevant the training experience is. Lets us tune rollout size, optimizer_epochs, etc
 
@@ -249,9 +249,9 @@ class PPOAgent(BaseAgent):
                 dict(collections.Counter(actions.view(-1).cpu().numpy().tolist()))
             ))
         self.total_steps += steps
-        config.logger.histo_summary('actions', actions, self.total_steps)  # How often it takes each action
-        config.logger.scalar_summary('terminals', terminals.mean(), self.total_steps)  # Lets us know how often it's dying
-        config.logger.scalar_summary('log_probs', log_probs.mean(), self.total_steps)  # How certain it is
-        config.logger.scalar_summary('rewards', rewards.mean(), self.total_steps)  # Raw reward
+        config.logger.histo_summary('rollout/actions', actions, self.total_steps)  # How often it takes each action
+        config.logger.scalar_summary('rollout/terminals', terminals.mean(), self.total_steps)  # Lets us know how often it's dying
+        config.logger.scalar_summary('rollout/log_probs', log_probs.mean(), self.total_steps)  # How certain it is
+        config.logger.scalar_summary('rollout/rewards', rewards.mean(), self.total_steps)  # Raw reward
 
         config.logger.writer.file_writer.flush()
